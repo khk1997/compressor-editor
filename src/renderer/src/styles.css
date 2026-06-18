@@ -1,0 +1,393 @@
+:root {
+  --bg: #1b1b1f;
+  --panel: #26262c;
+  --panel-2: #2f2f37;
+  --border: #3a3a44;
+  --text: #e6e6ea;
+  --muted: #9a9aa6;
+  --accent: #4f8cff;
+  --accent-2: #6bd968;
+  --warn: #ffb020;
+  --err: #ff5d5d;
+  --radius: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: 44px 1fr 160px;
+  height: 100%;
+}
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 0 88px; /* leave room for macOS traffic lights */
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+}
+.toolbar .btn {
+  -webkit-app-region: no-drag;
+}
+.brand {
+  margin-right: 10px;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+}
+.spacer {
+  flex: 1;
+}
+
+.btn {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.btn:hover {
+  border-color: var(--accent);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn-run {
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.btn-run:hover {
+  filter: brightness(1.1);
+}
+.btn-stop {
+  background: var(--err);
+  border-color: var(--err);
+  font-weight: 600;
+}
+.btn-stop:hover {
+  filter: brightness(1.1);
+}
+.sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.canvas {
+  position: relative;
+  min-height: 0;
+}
+
+/* Node info panel (right side of the canvas) */
+.infopanel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 264px;
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 14px 16px;
+  z-index: 12;
+}
+.info-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+.info-sub {
+  margin-top: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.info-desc {
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.info-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.info-list li {
+  margin-bottom: 5px;
+}
+.info-list b {
+  color: var(--text);
+}
+
+/* Blender-style knife stroke overlay */
+.knife-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+.knife-overlay polyline {
+  fill: none;
+  stroke: #ff5d5d;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+/* Nodes */
+.node {
+  width: 220px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.node-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-weight: 600;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.node-input .node-title {
+  border-top: 3px solid var(--accent);
+}
+.node-output .node-title {
+  border-top: 3px solid var(--accent-2);
+}
+.node-retime .node-title {
+  border-top: 3px solid #c98bff;
+}
+.dot-retime {
+  background: #c98bff;
+}
+.node-retime .react-flow__handle {
+  background: #c98bff;
+}
+.node-trim .node-title {
+  border-top: 3px solid #ffb020;
+}
+.dot-trim {
+  background: #ffb020;
+}
+.node-trim .react-flow__handle {
+  background: #ffb020;
+}
+.node-crop .node-title {
+  border-top: 3px solid #38c1c1;
+}
+.dot-crop {
+  background: #38c1c1;
+}
+.node-crop .react-flow__handle {
+  background: #38c1c1;
+}
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+/* Let grid inputs shrink instead of overflowing (Crop node was clipped). */
+.field-grid .field {
+  min-width: 0;
+}
+.field-grid input {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Edge (link) visibility */
+.react-flow__edge-path {
+  stroke: #6f9bff;
+  stroke-width: 2.5px;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #aecbff;
+  stroke-width: 3px;
+}
+
+/* Per-node delete button */
+.node-del {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.node-del:hover {
+  background: var(--err);
+  color: #fff;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.field-row input[type='checkbox'] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+.field-row > span {
+  color: var(--text);
+  font-size: 12px;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.dot-in {
+  background: var(--accent);
+}
+.dot-out {
+  background: var(--accent-2);
+}
+.badge {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.badge-ok {
+  color: var(--accent-2);
+}
+.badge-err {
+  color: var(--err);
+}
+
+.node-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.field select,
+.field input[type='number'] {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 7px;
+  font-size: 12px;
+}
+.field input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.btn-pick {
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hint {
+  font-size: 11px;
+  line-height: 1.4;
+}
+.hint-warn {
+  color: var(--warn);
+}
+.hint-err {
+  color: var(--err);
+  word-break: break-word;
+  max-height: 64px;
+  overflow: auto;
+}
+
+/* Selected node highlight (outline wraps outside without shifting layout) */
+.react-flow__node.selected .node {
+  outline: 2.5px solid #ff5d5d;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(255, 93, 93, 0.18), 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+
+.status-running {
+  border-color: var(--accent);
+}
+.status-done {
+  border-color: var(--accent-2);
+}
+.status-error {
+  border-color: var(--err);
+}
+
+/* Log panel */
+.logpanel {
+  background: #131316;
+  border-top: 1px solid var(--border);
+  overflow: auto;
+  padding: 8px 12px;
+  font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  color: #c8c8d0;
+  user-select: text;
+}
+.log-empty {
+  color: var(--muted);
+}
+.log-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+/* React Flow handles */
+.react-flow__handle {
+  width: 11px;
+  height: 11px;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+}
+.node-output .react-flow__handle {
+  background: var(--accent-2);
+}
