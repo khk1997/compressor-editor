@@ -1,5 +1,5 @@
 {
-  "name": "compressor",
+  "name": "compressor-editor",
   "version": "0.1.0",
   "description": "Node-based media compressor (PNG sequence / MOV / MP4 → WebP / MP4 / MOV)",
   "main": "./out/main/index.js",
