@@ -3,13 +3,37 @@
   "version": "0.1.0",
   "description": "Node-based media compressor (PNG sequence / MOV / MP4 → WebP / MP4 / MOV)",
   "main": "./out/main/index.js",
-  "author": "",
+  "author": "Patrick Kuo",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "package": "electron-vite build && electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.patrickkuo.compressor-editor",
+    "productName": "Compressor Editor",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ],
+      "category": "public.app-category.video"
+    },
+    "dmg": {
+      "title": "Compressor Editor"
+    }
   },
   "dependencies": {
     "@xyflow/react": "^12.3.5",
@@ -21,6 +45,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
     "electron": "^31.7.5",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
