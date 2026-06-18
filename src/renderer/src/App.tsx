@@ -21,9 +21,11 @@ import { TrimNode } from './nodes/TrimNode'
 import { CropNode } from './nodes/CropNode'
 import { InfoPanel } from './InfoPanel'
 import {
-  SUPPORTS_TARGET,
+  FORMAT_CODECS,
+  supportsTarget,
   type CropNodeData,
   type InputNodeData,
+  type OutputFormat,
   type OutputNodeData,
   type RetimeNodeData,
   type TrimNodeData
@@ -31,6 +33,30 @@ import {
 
 let idSeq = 1
 const nextId = (): string => `n${idSeq++}`
+
+/**
+ * Migrate an output node saved before MP4 codecs were merged into one container.
+ * Old graphs used separate `h265`/`av1` formats and a `movCodec` field; map both
+ * onto the unified `format` (container) + `codec` model.
+ */
+function migrateOutputNode(n: Node): Node {
+  const data = { ...(n.data as Record<string, unknown>) }
+  const oldFormat = data.format as string
+  if (oldFormat === 'h265') {
+    data.format = 'mp4'
+    data.codec = data.codec ?? 'h265'
+  } else if (oldFormat === 'av1') {
+    data.format = 'mp4'
+    data.codec = data.codec ?? 'av1'
+  }
+  // Adopt the legacy MOV codec field, then drop it.
+  if (data.codec == null) {
+    data.codec = data.movCodec ?? FORMAT_CODECS[data.format as OutputFormat]?.[0] ?? 'h264'
+  }
+  delete data.movCodec
+  if (data.hevcAlpha == null) data.hevcAlpha = false
+  return { ...n, data }
+}
 
 type Pt = { x: number; y: number }
 const ccw = (a: Pt, b: Pt, c: Pt): boolean =>
@@ -165,11 +191,13 @@ const initialNodes: Node[] = [
     position: { x: 520, y: 160 },
     data: {
       format: 'webp',
+      codec: 'h264',
       quality: 80,
       sizeMode: 'quality',
       targetMB: null,
       hardware: false,
       proresProfile: 3,
+      hevcAlpha: false,
       width: null,
       outputPath: null,
       status: 'idle',
@@ -330,11 +358,13 @@ function Flow(): JSX.Element {
         position: screenToFlowPosition({ x: 600, y: 220 }),
         data: {
           format: 'mp4',
+          codec: 'h264',
           quality: 75,
           sizeMode: 'quality',
           targetMB: null,
           hardware: false,
           proresProfile: 3,
+          hevcAlpha: false,
           width: null,
           outputPath: null,
           status: 'idle',
@@ -363,11 +393,13 @@ function Flow(): JSX.Element {
       }
       output: {
         format: string
+        codec: string
         quality: number
         sizeMode: string
         targetMB: number | null
         hardware: boolean
         proresProfile: number
+        hevcAlpha: boolean
         width: number | null
         outputPath: string
       }
@@ -414,7 +446,7 @@ function Flow(): JSX.Element {
 
       // Target-size mode needs a target value and a known duration.
       // (Sequences derive their duration from frame count in the main process.)
-      const isTarget = SUPPORTS_TARGET.includes(outData.format) && outData.sizeMode === 'target'
+      const isTarget = supportsTarget(outData.format, outData.codec) && outData.sizeMode === 'target'
       if (isTarget) {
         if (!outData.targetMB || outData.targetMB <= 0) {
           problems.push(`${out.id}: target size (MB) not set`)
@@ -440,11 +472,13 @@ function Flow(): JSX.Element {
         },
         output: {
           format: outData.format,
+          codec: outData.codec,
           quality: outData.quality,
           sizeMode: outData.sizeMode,
           targetMB: outData.targetMB,
           hardware: outData.hardware,
           proresProfile: outData.proresProfile,
+          hevcAlpha: outData.hevcAlpha,
           width: outData.width,
           outputPath: outData.outputPath
         },
@@ -508,7 +542,7 @@ function Flow(): JSX.Element {
     if (!text) return
     try {
       const g = JSON.parse(text) as { nodes: Node[]; edges: Edge[] }
-      setNodes(g.nodes)
+      setNodes(g.nodes.map((n) => (n.type === 'output-node' ? migrateOutputNode(n) : n)))
       setEdges(g.edges)
       // Bump the id counter past any loaded numeric id to avoid collisions.
       const maxId = Math.max(0, ...g.nodes.map((n) => Number(n.id.match(/\d+/)?.[0] ?? 0)))

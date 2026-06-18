@@ -1,5 +1,8 @@
 export type SourceType = 'sequence' | 'video'
-export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm' | 'h265' | 'av1'
+/** Output container. The actual video codec is chosen separately (see VideoCodec). */
+export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm'
+/** Video codec. Which ones are valid depends on the container (see FORMAT_CODECS). */
+export type VideoCodec = 'h264' | 'h265' | 'av1' | 'prores'
 
 export interface TrimNodeData {
   /** Start time in seconds. */
@@ -18,11 +21,6 @@ export interface CropNodeData {
   [key: string]: unknown
 }
 
-/** Formats that support the target-file-size (bitrate) workflow. */
-export const SUPPORTS_TARGET: OutputFormat[] = ['mp4', 'h265']
-/** Formats that can use the macOS VideoToolbox hardware encoder. */
-export const SUPPORTS_HARDWARE: OutputFormat[] = ['mp4', 'h265']
-
 /** ProRes profiles (MOV). 4444 keeps an alpha channel. */
 export const PRORES_PROFILES: { value: number; label: string }[] = [
   { value: 0, label: 'Proxy' },
@@ -31,9 +29,53 @@ export const PRORES_PROFILES: { value: number; label: string }[] = [
   { value: 3, label: 'HQ' },
   { value: 4, label: '4444 (alpha)' }
 ]
+
+export const CODEC_LABEL: Record<VideoCodec, string> = {
+  h264: 'H.264',
+  h265: 'H.265',
+  av1: 'AV1',
+  prores: 'ProRes'
+}
+
+/**
+ * Codecs selectable within each container; the first entry is the default.
+ * An empty list means the container has a single fixed codec (no choice shown).
+ */
+export const FORMAT_CODECS: Record<OutputFormat, VideoCodec[]> = {
+  webp: [],
+  mp4: ['h264', 'h265', 'av1'],
+  mov: ['prores', 'h264', 'h265'],
+  webm: []
+}
+
 export type JobState = 'idle' | 'running' | 'done' | 'error'
 export type SizeMode = 'quality' | 'target'
 export type Interpolation = 'sampling' | 'blend' | 'optical'
+
+/** Target-file-size (2-pass) is only meaningful for H.264/H.265 in an MP4. */
+export function supportsTarget(format: OutputFormat, codec: VideoCodec): boolean {
+  return format === 'mp4' && (codec === 'h264' || codec === 'h265')
+}
+/** VideoToolbox hardware encode applies to H.264/H.265 in an MP4 or MOV. */
+export function supportsHardware(format: OutputFormat, codec: VideoCodec): boolean {
+  return (format === 'mp4' || format === 'mov') && (codec === 'h264' || codec === 'h265')
+}
+/** MOV + H.265 can carry alpha via Apple's "HEVC with Alpha" (VideoToolbox). */
+export function supportsHevcAlpha(format: OutputFormat, codec: VideoCodec): boolean {
+  return format === 'mov' && codec === 'h265'
+}
+/** Whether the chosen output actually keeps an alpha (transparency) channel. */
+export function supportsAlpha(
+  format: OutputFormat,
+  codec: VideoCodec,
+  proresProfile: number,
+  hevcAlpha: boolean
+): boolean {
+  if (format === 'webp' || format === 'webm') return true
+  if (format === 'mov' && codec === 'prores' && proresProfile === 4) return true
+  if (supportsHevcAlpha(format, codec) && hevcAlpha) return true
+  return false
+}
 
 export interface RetimeNodeData {
   /** Playback speed in percent (100 = normal, 50 = half speed, 200 = double). */
@@ -62,14 +104,18 @@ export interface InputNodeData {
 
 export interface OutputNodeData {
   format: OutputFormat
+  /** Video codec within the container (see FORMAT_CODECS for valid choices). */
+  codec: VideoCodec
   quality: number
   sizeMode: SizeMode
-  /** Desired output size in MB when sizeMode === 'target' (MP4 only). */
+  /** Desired output size in MB when sizeMode === 'target' (MP4 H.264/H.265 only). */
   targetMB: number | null
-  /** Use macOS VideoToolbox hardware encoder (MP4 / H.265). */
+  /** Use macOS VideoToolbox hardware encoder (MP4 / MOV, H.264/H.265). */
   hardware: boolean
   /** ProRes profile (MOV): 0 Proxy … 3 HQ … 4 4444(alpha). */
   proresProfile: number
+  /** MOV + H.265 only: emit Apple "HEVC with Alpha" (forces VideoToolbox). */
+  hevcAlpha: boolean
   width: number | null
   outputPath: string | null
   status: JobState
@@ -78,21 +124,9 @@ export interface OutputNodeData {
   [key: string]: unknown
 }
 
-/** Whether a given output format can carry an alpha (transparency) channel. */
-export const FORMAT_SUPPORTS_ALPHA: Record<OutputFormat, boolean> = {
-  webp: true,
-  mov: true, // only with the ProRes 4444 profile
-  webm: true, // VP9 yuva420p + auto-alt-ref 0 (alpha_mode=1, browser-decodable)
-  mp4: false,
-  h265: false,
-  av1: false
-}
-
 export const FORMAT_EXT: Record<OutputFormat, string> = {
   webp: 'webp',
   mp4: 'mp4',
   mov: 'mov',
-  webm: 'webm',
-  h265: 'mp4',
-  av1: 'mp4'
+  webm: 'webm'
 }

@@ -1,15 +1,41 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync, readdirSync, statSync, rmSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import ffmpegStatic from 'ffmpeg-static'
 
 /**
- * Resolve the ffmpeg binary. We prefer the bundled ffmpeg-static binary so the
- * app works without a system install, but fall back to a `ffmpeg` on PATH.
+ * Probe the major version number of an ffmpeg binary (returns 0 on failure).
+ * We use this to prefer a newer system binary over the bundled one when available,
+ * because ffmpeg 6.x (ffmpeg-static) cannot decode Apple HEVC-with-Alpha video
+ * inputs — the alpha auxiliary layer was added in ffmpeg 7+.
+ */
+function ffmpegMajorVersion(bin: string): number {
+  try {
+    const r = spawnSync(bin, ['-version'], { encoding: 'utf8', timeout: 3000 })
+    const m = (r.stdout || '').match(/ffmpeg version (\d+)/)
+    return m ? Number(m[1]) : 0
+  } catch {
+    return 0
+  }
+}
+
+const SYSTEM_FF_PATHS = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']
+
+/**
+ * Resolve the ffmpeg binary.
+ * Prefer the system ffmpeg if it is version 7 or newer — that threshold is when
+ * Apple HEVC-with-Alpha decoding became reliable. Fall back to the bundled
+ * ffmpeg-static (v6) when no suitable system binary is found, so the app still
+ * works on machines without a Homebrew install.
  */
 export function resolveFfmpegPath(): string {
-  // In a packaged app the binary lives inside app.asar.unpacked.
+  for (const p of SYSTEM_FF_PATHS) {
+    if (existsSync(p) && ffmpegMajorVersion(p) >= 7) return p
+  }
+  // Try PATH as well (covers custom installs).
+  if (ffmpegMajorVersion('ffmpeg') >= 7) return 'ffmpeg'
+  // Fall back to bundled binary.
   const fromStatic = ffmpegStatic ? ffmpegStatic.replace('app.asar', 'app.asar.unpacked') : null
   if (fromStatic && existsSync(fromStatic)) return fromStatic
   return 'ffmpeg'
@@ -77,13 +103,52 @@ export function probeSequence(folder: string): Promise<SequenceInfo> {
 }
 
 export type SourceType = 'sequence' | 'video'
-export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm' | 'h265' | 'av1'
+export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm'
+export type VideoCodec = 'h264' | 'h265' | 'av1' | 'prores'
 
-/** Software / hardware video codecs per H.26x format. */
-const SW_CODEC: Record<string, string> = { mp4: 'libx264', h265: 'libx265' }
-const HW_CODEC: Record<string, string> = { mp4: 'h264_videotoolbox', h265: 'hevc_videotoolbox' }
+/** Software / hardware H.26x encoders per codec. */
+const SW_CODEC: Record<string, string> = { h264: 'libx264', h265: 'libx265' }
+const HW_CODEC: Record<string, string> = { h264: 'h264_videotoolbox', h265: 'hevc_videotoolbox' }
 /** Extra muxer args (H.265 needs the hvc1 tag for QuickTime/Safari). */
-const codecExtra = (format: string): string[] => (format === 'h265' ? ['-tag:v', 'hvc1'] : [])
+const codecExtra = (codec: string): string[] => (codec === 'h265' ? ['-tag:v', 'hvc1'] : [])
+
+/**
+ * Push H.264 / H.265 encoder args (used by MP4 and MOV outputs).
+ * `kind` selects the codec family; `quality` is the 0–100 slider value.
+ */
+function pushH26xArgs(
+  args: string[],
+  kind: 'h264' | 'h265',
+  hardware: boolean,
+  quality: number
+): void {
+  if (hardware) {
+    // VideoToolbox constant quality: -q:v 0–100, higher = better (matches slider).
+    args.push('-c:v', HW_CODEC[kind], '-q:v', String(quality), ...codecExtra(kind))
+  } else {
+    // CRF: invert the slider. x264 18→51, x265 22→51.
+    const span = kind === 'h265' ? 29 : 33
+    const crf = Math.round(51 - (quality / 100) * span)
+    args.push('-c:v', SW_CODEC[kind], '-crf', String(crf), '-preset', 'medium', ...codecExtra(kind))
+  }
+  args.push('-pix_fmt', 'yuv420p', '-movflags', '+faststart')
+}
+
+/** Push encoder args for any H.264/H.265/AV1 video codec (MP4 container). */
+function pushVideoCodecArgs(
+  args: string[],
+  codec: VideoCodec,
+  hardware: boolean,
+  quality: number
+): void {
+  if (codec === 'av1') {
+    // SVT-AV1: CRF-style quality (-crf 0–63, lower = better). 100 → 18, 0 → 58.
+    const crf = Math.round(58 - (quality / 100) * 40)
+    args.push('-c:v', 'libsvtav1', '-crf', String(crf), '-preset', '7', '-pix_fmt', 'yuv420p', '-movflags', '+faststart')
+  } else {
+    pushH26xArgs(args, codec as 'h264' | 'h265', hardware, quality)
+  }
+}
 export type SizeMode = 'quality' | 'target'
 export type Interpolation = 'sampling' | 'blend' | 'optical'
 
@@ -137,6 +202,10 @@ export interface OutputSpec {
   hardware: boolean
   /** ProRes profile (MOV): 0 Proxy … 3 HQ … 4 4444(alpha). */
   proresProfile: number
+  /** Video codec within the container. */
+  codec: VideoCodec
+  /** MOV + H.265 only: emit Apple "HEVC with Alpha" (forces VideoToolbox). */
+  hevcAlpha: boolean
   outputPath: string
 }
 
@@ -309,30 +378,24 @@ export function buildArgs(job: Job): string[] {
       break
     }
     case 'mp4': {
-      if (output.hardware) {
-        // VideoToolbox constant quality: -q:v 0–100, higher = better (matches slider).
-        args.push('-c:v', 'h264_videotoolbox', '-q:v', String(output.quality), '-pix_fmt', 'yuv420p', '-movflags', '+faststart')
-      } else {
-        // H.264 via CRF: 18 (high quality) → 51 (low). Invert the slider.
-        const crf = Math.round(51 - (output.quality / 100) * 33)
-        args.push('-c:v', 'libx264', '-crf', String(crf), '-preset', 'medium', '-pix_fmt', 'yuv420p', '-movflags', '+faststart')
-      }
+      // Container for H.264 / H.265 / AV1, all quality-driven.
+      pushVideoCodecArgs(args, output.codec, output.hardware, output.quality)
       break
     }
     case 'mov': {
-      // Explicit ProRes profile; 4444 carries alpha (yuva444p10le).
-      const profile = output.proresProfile
-      const pix = profile === 4 ? 'yuva444p10le' : 'yuv422p10le'
-      args.push('-c:v', 'prores_ks', '-profile:v', String(profile), '-pix_fmt', pix)
-      break
-    }
-    case 'h265': {
-      if (output.hardware) {
-        args.push('-c:v', 'hevc_videotoolbox', '-q:v', String(output.quality), ...codecExtra('h265'), '-pix_fmt', 'yuv420p', '-movflags', '+faststart')
+      if (output.codec === 'h265' && output.hevcAlpha) {
+        // Apple "HEVC with Alpha". VideoToolbox-only — libx265 can't emit a
+        // QuickTime-playable alpha layer. bgra feeds the encoder an alpha plane.
+        const aq = (output.quality / 100).toFixed(2)
+        args.push('-c:v', 'hevc_videotoolbox', '-q:v', String(output.quality), '-alpha_quality', aq, '-tag:v', 'hvc1', '-pix_fmt', 'bgra', '-movflags', '+faststart')
+      } else if (output.codec === 'h264' || output.codec === 'h265') {
+        // H.264 / H.265 inside a MOV container; quality-driven like MP4.
+        pushH26xArgs(args, output.codec, output.hardware, output.quality)
       } else {
-        // x265 CRF: 22 (high) → 51 (low).
-        const crf = Math.round(51 - (output.quality / 100) * 29)
-        args.push('-c:v', 'libx265', '-crf', String(crf), '-preset', 'medium', ...codecExtra('h265'), '-pix_fmt', 'yuv420p', '-movflags', '+faststart')
+        // Explicit ProRes profile; 4444 carries alpha (yuva444p10le).
+        const profile = output.proresProfile
+        const pix = profile === 4 ? 'yuva444p10le' : 'yuv422p10le'
+        args.push('-c:v', 'prores_ks', '-profile:v', String(profile), '-pix_fmt', pix)
       }
       break
     }
@@ -360,12 +423,6 @@ export function buildArgs(job: Job): string[] {
         '-cpu-used',
         '4'
       )
-      break
-    }
-    case 'av1': {
-      // SVT-AV1: CRF-style quality (-crf 0–63, lower = better). preset 0–13 (higher=faster).
-      const crf = Math.round(58 - (output.quality / 100) * 40) // 100 → 18, 0 → 58
-      args.push('-c:v', 'libsvtav1', '-crf', String(crf), '-preset', '7', '-pix_fmt', 'yuv420p', '-movflags', '+faststart')
       break
     }
   }
@@ -491,7 +548,8 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
   const totalUs = outDurationSec ? outDurationSec * 1_000_000 : null
 
   const useTarget =
-    (output.format === 'mp4' || output.format === 'h265') &&
+    output.format === 'mp4' &&
+    (output.codec === 'h264' || output.codec === 'h265') &&
     output.sizeMode === 'target' &&
     !!output.targetMB &&
     output.targetMB > 0 &&
@@ -612,10 +670,10 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
         '-y',
         ...buildInputArgs(input),
         '-c:v',
-        HW_CODEC[output.format],
+        HW_CODEC[output.codec],
         '-b:v',
         String(vbps),
-        ...codecExtra(output.format),
+        ...codecExtra(output.codec),
         '-pix_fmt',
         'yuv420p',
         ...vf,
@@ -641,12 +699,12 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
       const common = [
         ...buildInputArgs(input),
         '-c:v',
-        SW_CODEC[output.format],
+        SW_CODEC[output.codec],
         '-b:v',
         String(vbps),
         '-preset',
         'medium',
-        ...codecExtra(output.format),
+        ...codecExtra(output.codec),
         '-pix_fmt',
         'yuv420p',
         ...vf

@@ -1,5 +1,13 @@
 import type { Node } from '@xyflow/react'
-import type { OutputFormat } from './types'
+import {
+  CODEC_LABEL,
+  FORMAT_CODECS,
+  supportsHardware,
+  supportsHevcAlpha,
+  supportsTarget,
+  type OutputFormat,
+  type VideoCodec
+} from './types'
 
 const NODE_INFO: Record<string, { title: string; desc: string }> = {
   'input-node': {
@@ -20,28 +28,31 @@ const NODE_INFO: Record<string, { title: string; desc: string }> = {
   },
   'output-node': {
     title: 'Output · 輸出',
-    desc: '設定輸出格式、品質/目標大小與尺寸。一個來源可同時接多個 Output 產生不同格式。'
+    desc: '設定輸出容器、編碼、品質/目標大小與尺寸。一個來源可同時接多個 Output 產生不同格式。'
   }
 }
 
+/** Container-level description (codec choice is shown separately below). */
 const FORMAT_LABEL: Record<OutputFormat, string> = {
   webp: 'WebP(動畫)',
-  mp4: 'MP4(H.264)',
-  h265: 'MP4(H.265 / HEVC)',
-  mov: 'MOV(ProRes)',
-  webm: 'WebM(VP9)',
-  av1: 'MP4(AV1)'
+  mp4: 'MP4(容器)',
+  mov: 'MOV(容器)',
+  webm: 'WebM(VP9)'
 }
 
 const FORMAT_INFO: Record<OutputFormat, string> = {
   webp: '動畫圖片格式,可保留透明 alpha。適合網頁短動畫、貼圖。無音訊。檔案通常比影片小但畫質有限。',
-  mp4: 'H.264。相容性最高,幾乎所有裝置/瀏覽器都能播。編碼快。不支援透明。檔案比 H.265/AV1 大。日常首選。',
-  h265:
-    'H.265 / HEVC。同畫質下檔案約比 H.264 小 30–50%,但編碼較慢、較舊的裝置或部分瀏覽器支援度較差(已加 hvc1 標籤以利 Apple 裝置播放)。在意檔案大小、播放環境較新時用。',
-  mov: 'ProRes,剪輯用的高品質中間檔,檔案很大。Proxy→HQ 品質遞增;選 4444 profile 可保留透明 alpha。給後製/剪輯軟體用,不適合直接分享。',
-  webm: 'VP9。網頁友善,可保留透明 alpha(瀏覽器可解),壓縮率優於 H.264。編碼較慢。Safari 舊版支援有限。',
-  av1:
-    'AV1。壓縮率最佳(同畫質比 H.265 再小一截),適合串流/長期保存。但編碼最慢,且需較新的裝置/瀏覽器才能播。'
+  mp4: '相容性最高的影片容器,幾乎所有裝置/瀏覽器都能播。可裝 H.264 / H.265 / AV1,用下面的 Codec 選擇。不支援透明。',
+  mov: '剪輯用容器。預設 ProRes(高品質中間檔,檔案很大);也可改用 H.264 / H.265 壓成較小的檔案。用下面的 Codec 切換。',
+  webm: 'VP9。網頁友善,可保留透明 alpha(瀏覽器可解),壓縮率優於 H.264。編碼較慢。Safari 舊版支援有限。'
+}
+
+/** Per-codec guidance, shown for whichever codecs the chosen container offers. */
+const CODEC_GUIDE: Record<VideoCodec, string> = {
+  h264: '相容性最高、編碼快、檔案較大,用品質滑桿控畫質。不支援透明。日常首選。',
+  h265: '同畫質比 H.264 小 30–50%,編碼較慢、舊裝置支援較差(已加 hvc1 標籤利於 Apple 播放)。在 MOV 容器下可勾「Keep alpha」輸出 Apple HEVC-with-Alpha 保留透明。',
+  av1: '壓縮率最佳(同畫質再比 H.265 小一截),適合串流/保存。編碼最慢,需較新裝置才能播。不支援透明。',
+  prores: '剪輯用高品質中間檔,用 profile 控畫質,檔案最大;選 4444 profile 可保留透明 alpha。'
 }
 
 const PRORES_GUIDE: { name: string; text: string }[] = [
@@ -63,7 +74,10 @@ export function InfoPanel({ node }: { node: Node | undefined }): JSX.Element | n
   const info = NODE_INFO[node.type]
   if (!info) return null
   const fmt = node.type === 'output-node' ? (node.data as { format: OutputFormat }).format : null
-  const targetable = fmt === 'mp4' || fmt === 'h265'
+  const codecs = fmt ? FORMAT_CODECS[fmt] : []
+  const codec: VideoCodec | null = fmt
+    ? ((node.data as { codec?: VideoCodec }).codec ?? codecs[0] ?? 'h264')
+    : null
 
   return (
     <aside className="infopanel">
@@ -77,7 +91,20 @@ export function InfoPanel({ node }: { node: Node | undefined }): JSX.Element | n
         </>
       )}
 
-      {fmt === 'mov' && (
+      {codecs.length > 0 && (
+        <>
+          <div className="info-sub">Codec</div>
+          <ul className="info-list">
+            {codecs.map((c) => (
+              <li key={c}>
+                <b>{CODEC_LABEL[c]}</b> — {CODEC_GUIDE[c]}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {fmt === 'mov' && codec === 'prores' && (
         <>
           <div className="info-sub">ProRes profile</div>
           <ul className="info-list">
@@ -90,7 +117,7 @@ export function InfoPanel({ node }: { node: Node | undefined }): JSX.Element | n
         </>
       )}
 
-      {targetable && (
+      {fmt && codec && supportsTarget(fmt, codec) && (
         <>
           <div className="info-sub">Size by</div>
           <div className="info-desc">
@@ -98,9 +125,25 @@ export function InfoPanel({ node }: { node: Node | undefined }): JSX.Element | n
             <br />
             <b>Target file size</b> — 你指定 MB 數,程式反推碼率壓到接近該大小(2-pass)。
           </div>
+        </>
+      )}
+
+      {fmt && codec && supportsHardware(fmt, codec) && (
+        <>
           <div className="info-sub">Hardware encode</div>
           <div className="info-desc">
             用 Mac VideoToolbox 硬體編碼,速度快很多、較省電;畫質/壓縮率略遜於軟體編碼。
+          </div>
+        </>
+      )}
+
+      {fmt && codec && supportsHevcAlpha(fmt, codec) && (
+        <>
+          <div className="info-sub">Keep alpha (HEVC)</div>
+          <div className="info-desc">
+            輸出 Apple「HEVC with Alpha」保留透明通道,給 Final Cut / Motion / 網頁去背用。只能走
+            VideoToolbox 硬體編碼(勾選後自動套用);來源需本身帶 alpha(如 PNG 序列、ProRes
+            4444、WebM alpha)。
           </div>
         </>
       )}

@@ -1,13 +1,17 @@
 import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { DeleteButton } from './DeleteButton'
 import {
+  CODEC_LABEL,
+  FORMAT_CODECS,
   FORMAT_EXT,
-  FORMAT_SUPPORTS_ALPHA,
   PRORES_PROFILES,
-  SUPPORTS_HARDWARE,
-  SUPPORTS_TARGET,
+  supportsAlpha,
+  supportsHardware,
+  supportsHevcAlpha,
+  supportsTarget,
   type OutputFormat,
-  type OutputNodeData
+  type OutputNodeData,
+  type VideoCodec
 } from '../types'
 
 function basename(p: string): string {
@@ -17,6 +21,8 @@ function basename(p: string): string {
 export function OutputNode({ id, data }: NodeProps): JSX.Element {
   const { updateNodeData } = useReactFlow()
   const d = data as OutputNodeData
+  // Graphs saved before the codec field existed default to the container's first codec.
+  const codec: VideoCodec = d.codec ?? FORMAT_CODECS[d.format][0] ?? 'h264'
 
   const pickOutput = async (): Promise<void> => {
     const path = await window.api.saveFile(`output.${FORMAT_EXT[d.format]}`)
@@ -27,15 +33,29 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
     // Keep the chosen output filename's extension in sync with the format.
     let outputPath = d.outputPath
     if (outputPath) outputPath = outputPath.replace(/\.[^.]+$/, `.${FORMAT_EXT[format]}`)
-    // Target-size / hardware only apply to some formats; revert otherwise.
-    const sizeMode = SUPPORTS_TARGET.includes(format) ? d.sizeMode : 'quality'
-    const hardware = SUPPORTS_HARDWARE.includes(format) ? d.hardware : false
-    updateNodeData(id, { format, outputPath, sizeMode, hardware })
+    // Reset the codec to the new container's default if the current one isn't valid.
+    const codecs = FORMAT_CODECS[format]
+    const nextCodec = codecs.includes(codec) ? codec : (codecs[0] ?? codec)
+    // Target-size / hardware only apply to some format+codec combos; revert otherwise.
+    const sizeMode = supportsTarget(format, nextCodec) ? d.sizeMode : 'quality'
+    const hardware = supportsHardware(format, nextCodec) ? d.hardware : false
+    updateNodeData(id, { format, codec: nextCodec, outputPath, sizeMode, hardware })
   }
 
-  const targetMode = SUPPORTS_TARGET.includes(d.format) && d.sizeMode === 'target'
-  const isProres = d.format === 'mov'
+  const onCodec = (next: VideoCodec): void => {
+    const sizeMode = supportsTarget(d.format, next) ? d.sizeMode : 'quality'
+    const hardware = supportsHardware(d.format, next) ? d.hardware : false
+    updateNodeData(id, { codec: next, sizeMode, hardware })
+  }
+
+  const codecChoices = FORMAT_CODECS[d.format]
+  const isProres = d.format === 'mov' && codec === 'prores'
   const proresAlpha = isProres && d.proresProfile === 4
+  const hevcAlphaAvail = supportsHevcAlpha(d.format, codec)
+  const hevcAlpha = hevcAlphaAvail && !!d.hevcAlpha
+  const targetMode = supportsTarget(d.format, codec) && d.sizeMode === 'target'
+  const showHardware = supportsHardware(d.format, codec)
+  const keepsAlpha = supportsAlpha(d.format, codec, d.proresProfile, hevcAlpha)
 
   return (
     <div className={`node node-output status-${d.status}`}>
@@ -56,15 +76,30 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
             onChange={(e) => onFormat(e.target.value as OutputFormat)}
           >
             <option value="webp">WebP (animated)</option>
-            <option value="mp4">MP4 (H.264)</option>
-            <option value="h265">MP4 (H.265)</option>
-            <option value="mov">MOV (ProRes)</option>
+            <option value="mp4">MP4</option>
+            <option value="mov">MOV</option>
             <option value="webm">WebM (VP9)</option>
-            <option value="av1">MP4 (AV1)</option>
           </select>
         </label>
 
-        {SUPPORTS_TARGET.includes(d.format) && (
+        {codecChoices.length > 0 && (
+          <label className="field">
+            <span>Codec</span>
+            <select
+              className="nodrag"
+              value={codec}
+              onChange={(e) => onCodec(e.target.value as VideoCodec)}
+            >
+              {codecChoices.map((c) => (
+                <option key={c} value={c}>
+                  {CODEC_LABEL[c]}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {supportsTarget(d.format, codec) && (
           <label className="field">
             <span>Size by</span>
             <select
@@ -135,22 +170,38 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
           />
         </label>
 
-        {SUPPORTS_HARDWARE.includes(d.format) && (
+        {showHardware && (
           <label className="field-row">
             <input
               className="nodrag"
               type="checkbox"
-              checked={d.hardware}
+              checked={hevcAlpha || d.hardware}
+              disabled={hevcAlpha}
               onChange={(e) => updateNodeData(id, { hardware: e.target.checked })}
             />
-            <span>Hardware encode (VideoToolbox)</span>
+            <span>
+              Hardware encode (VideoToolbox)
+              {hevcAlpha && ' — required by HEVC alpha'}
+            </span>
           </label>
         )}
 
-        {!FORMAT_SUPPORTS_ALPHA[d.format] && (
+        {hevcAlphaAvail && (
+          <label className="field-row">
+            <input
+              className="nodrag"
+              type="checkbox"
+              checked={hevcAlpha}
+              onChange={(e) => updateNodeData(id, { hevcAlpha: e.target.checked })}
+            />
+            <span>Keep alpha (HEVC, VideoToolbox)</span>
+          </label>
+        )}
+
+        {!keepsAlpha && !isProres && !hevcAlphaAvail && (
           <div className="hint hint-warn">
-            ⚠ {d.format === 'h265' ? 'H.265' : d.format.toUpperCase()} cannot keep transparency.
-            Use WebP / WebM / ProRes 4444 for alpha.
+            ⚠ {CODEC_LABEL[codec]} cannot keep transparency. Use WebP / WebM / ProRes 4444 for
+            alpha.
           </div>
         )}
         {isProres && !proresAlpha && (
