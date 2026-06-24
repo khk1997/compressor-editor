@@ -102,6 +102,11 @@ export interface InputNodeData {
   [key: string]: unknown
 }
 
+export interface LocationNodeData {
+  dir: string | null
+  [key: string]: unknown
+}
+
 export interface OutputNodeData {
   format: OutputFormat
   /** Video codec within the container (see FORMAT_CODECS for valid choices). */
@@ -118,6 +123,10 @@ export interface OutputNodeData {
   hevcAlpha: boolean
   width: number | null
   outputPath: string | null
+  /** Directory override from a connected Location node; null = use outputPath as a full path. */
+  locationDir?: string | null
+  /** True when a Location node is wired to the location handle (even before a folder is picked). */
+  locationConnected?: boolean
   status: JobState
   percent: number
   message?: string

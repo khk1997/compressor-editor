@@ -19,12 +19,14 @@ import { OutputNode } from './nodes/OutputNode'
 import { RetimeNode } from './nodes/RetimeNode'
 import { TrimNode } from './nodes/TrimNode'
 import { CropNode } from './nodes/CropNode'
+import { LocationNode } from './nodes/LocationNode'
 import { InfoPanel } from './InfoPanel'
 import {
   FORMAT_CODECS,
   supportsTarget,
   type CropNodeData,
   type InputNodeData,
+  type LocationNodeData,
   type OutputFormat,
   type OutputNodeData,
   type RetimeNodeData,
@@ -224,7 +226,8 @@ function Flow(): JSX.Element {
       'output-node': OutputNode,
       'retime-node': RetimeNode,
       'trim-node': TrimNode,
-      'crop-node': CropNode
+      'crop-node': CropNode,
+      'location-node': LocationNode
     }),
     []
   )
@@ -233,6 +236,31 @@ function Flow(): JSX.Element {
     (c: Connection) => setEdges((eds) => addEdge(c, eds)),
     [setEdges]
   )
+
+  // Sync locationDir + locationConnected from connected Location nodes into each Output node.
+  useEffect(() => {
+    type LocInfo = { connected: boolean; dir: string | null }
+    const locationByOutput = new Map<string, LocInfo>()
+    for (const edge of edges) {
+      if (edge.targetHandle !== 'location') continue
+      const src = nodes.find((n) => n.id === edge.source)
+      if (src?.type === 'location-node') {
+        locationByOutput.set(edge.target, {
+          connected: true,
+          dir: (src.data as LocationNodeData).dir
+        })
+      }
+    }
+    for (const node of nodes.filter((n) => n.type === 'output-node')) {
+      const loc = locationByOutput.get(node.id)
+      const newConnected = loc?.connected ?? false
+      const newDir = loc?.dir ?? null
+      const data = node.data as OutputNodeData
+      if (data.locationConnected !== newConnected || data.locationDir !== newDir) {
+        updateNodeData(node.id, { locationConnected: newConnected, locationDir: newDir })
+      }
+    }
+  }, [edges, nodes, updateNodeData])
 
   // Blender-style: drop a processing node onto a link to splice it in.
   const PROCESSING = ['retime-node', 'trim-node', 'crop-node']
@@ -367,17 +395,30 @@ function Flow(): JSX.Element {
           hevcAlpha: false,
           width: null,
           outputPath: null,
+          locationDir: null,
           status: 'idle',
           percent: 0
         } satisfies OutputNodeData
       }
     ])
 
+  const addLocation = (): void =>
+    setNodes((n) => [
+      ...n,
+      {
+        id: nextId(),
+        type: 'location-node',
+        position: screenToFlowPosition({ x: 600, y: 420 }),
+        data: { dir: null } satisfies LocationNodeData
+      }
+    ])
+
   /** Walk each Output back through an optional Retime node to its Input. */
   const buildJobs = useCallback(() => {
     const byId = new Map(nodes.map((n) => [n.id, n]))
+    // Only follow media-chain edges, not location edges.
     const incomingOf = (nodeId: string): Node | undefined => {
-      const edge = edges.find((e) => e.target === nodeId)
+      const edge = edges.find((e) => e.target === nodeId && e.targetHandle !== 'location')
       return edge ? byId.get(edge.source) : undefined
     }
 
@@ -439,7 +480,20 @@ function Flow(): JSX.Element {
         problems.push(`${out.id}: input has no source selected`)
         continue
       }
-      if (!outData.outputPath) {
+
+      // Resolve final output path: location node dir + filename, or direct full path.
+      const locationDir = outData.locationDir ?? null
+      let resolvedOutputPath: string | null = outData.outputPath
+      if (locationDir) {
+        const filename = outData.outputPath
+          ? outData.outputPath.split(/[/\\]/).pop() || outData.outputPath
+          : null
+        if (!filename) {
+          problems.push(`${out.id}: location connected but no filename set`)
+          continue
+        }
+        resolvedOutputPath = `${locationDir}/${filename}`
+      } else if (!outData.outputPath) {
         problems.push(`${out.id}: no output file chosen`)
         continue
       }
@@ -480,7 +534,7 @@ function Flow(): JSX.Element {
           proresProfile: outData.proresProfile,
           hevcAlpha: outData.hevcAlpha,
           width: outData.width,
-          outputPath: outData.outputPath
+          outputPath: resolvedOutputPath as string
         },
         retime: retime
           ? { speed: retime.speed, reverse: retime.reverse, interpolation: retime.interpolation }
@@ -571,6 +625,9 @@ function Flow(): JSX.Element {
         </button>
         <button className="btn" onClick={addOutput}>
           + Output
+        </button>
+        <button className="btn" onClick={addLocation}>
+          + Location
         </button>
         <span className="sep" />
         <button className="btn" onClick={saveGraph}>

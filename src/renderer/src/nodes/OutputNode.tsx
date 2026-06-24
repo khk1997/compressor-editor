@@ -18,6 +18,7 @@ function basename(p: string): string {
   return p.split(/[/\\]/).pop() || p
 }
 
+
 export function OutputNode({ id, data }: NodeProps): JSX.Element {
   const { updateNodeData } = useReactFlow()
   const d = data as OutputNodeData
@@ -57,9 +58,20 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
   const showHardware = supportsHardware(d.format, codec)
   const keepsAlpha = supportsAlpha(d.format, codec, d.proresProfile, hevcAlpha)
 
+  // hasLocation is true the moment a location node is wired up, even before a folder is picked.
+  const hasLocation = !!d.locationConnected
+  const ext = FORMAT_EXT[d.format]
+  // In location mode the user types only the stem; the extension is shown/managed separately.
+  const displayStem = d.outputPath ? basename(d.outputPath).replace(/\.[^.]+$/, '') : ''
+
+  const onFilenameStem = (stem: string): void => {
+    // Store the full filename (stem + current extension) so format changes & builds stay in sync.
+    updateNodeData(id, { outputPath: stem ? `${stem}.${ext}` : null })
+  }
+
   return (
     <div className={`node node-output status-${d.status}`}>
-      <Handle type="target" position={Position.Left} />
+      <Handle type="target" position={Position.Left} style={{ top: '30%' }} />
       <div className="node-title">
         <span className="dot dot-out" /> Output
         {d.status === 'running' && <span className="badge">{Math.round(d.percent * 100)}%</span>}
@@ -208,14 +220,47 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
           <div className="hint hint-warn">⚠ Only the 4444 profile keeps transparency (alpha).</div>
         )}
 
-        <button className="btn btn-pick nodrag" onClick={pickOutput}>
-          {d.outputPath ? basename(d.outputPath) : 'Save as…'}
-        </button>
+        <div className="output-dest">
+          {/* location handle lives here so it stays centered on the destination row.
+              left:-12 cancels node-body's padding so it sits on the node's left edge. */}
+          <Handle
+            type="target"
+            id="location"
+            position={Position.Left}
+            style={{ left: -12, top: '50%' }}
+          />
+          {hasLocation ? (
+            <div className="location-field">
+              <div className="hint hint-loc-dir">
+                📁 {d.locationDir ?? 'waiting for folder…'}
+              </div>
+              <div className="filename-row">
+                <input
+                  className="nodrag location-filename-input"
+                  type="text"
+                  placeholder="output"
+                  value={displayStem}
+                  onChange={(e) => onFilenameStem(e.target.value)}
+                />
+                <span className="filename-ext">.{ext}</span>
+              </div>
+            </div>
+          ) : (
+            <button className="btn btn-pick nodrag" onClick={pickOutput}>
+              {d.outputPath ? basename(d.outputPath) : 'Save as…'}
+            </button>
+          )}
+        </div>
 
-        {d.status === 'done' && d.outputPath && (
+        {d.status === 'done' && (d.outputPath || hasLocation) && (
           <button
             className="btn btn-pick nodrag"
-            onClick={() => d.outputPath && window.api.reveal(d.outputPath)}
+            onClick={() => {
+              const fullPath = hasLocation && d.outputPath
+                ? `${d.locationDir}/${basename(d.outputPath)}`
+                : d.outputPath
+              if (fullPath) window.api.reveal(fullPath)
+            }}
           >
             📂 Reveal in Finder
           </button>

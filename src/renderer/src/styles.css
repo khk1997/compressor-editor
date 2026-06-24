@@ -170,7 +170,9 @@ body,
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
-  overflow: hidden;
+  /* visible (not hidden) so connection handles can sit on the node's edge without
+     being clipped — clipping the handle desyncs it from React Flow's link endpoint. */
+  overflow: visible;
 }
 .node-title {
   display: flex;
@@ -180,6 +182,9 @@ body,
   font-weight: 600;
   background: var(--panel-2);
   border-bottom: 1px solid var(--border);
+  /* round the top corners ourselves now that .node no longer clips. */
+  border-top-left-radius: var(--radius);
+  border-top-right-radius: var(--radius);
 }
 .node-input .node-title {
   border-top: 3px solid var(--accent);
@@ -213,6 +218,58 @@ body,
 }
 .node-crop .react-flow__handle {
   background: #38c1c1;
+}
+.node-location .node-title {
+  border-top: 3px solid #ff9845;
+}
+.dot-loc {
+  background: #ff9845;
+}
+.node-location .react-flow__handle {
+  background: #ff9845;
+}
+.hint-loc-path {
+  color: var(--muted);
+  word-break: break-all;
+}
+.hint-loc-dir {
+  color: #ff9845;
+  font-size: 11px;
+  word-break: break-all;
+}
+.location-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.filename-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.location-filename-input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 7px;
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.location-filename-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.filename-ext {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* Destination row: holds the "Save as…" button or the filename field, plus the
+   location handle. position:relative so the handle can pin to its vertical center. */
+.output-dest {
+  position: relative;
 }
 .field-grid {
   display: grid;
