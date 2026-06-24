@@ -15,6 +15,7 @@
   "build": {
     "appId": "com.patrickkuo.compressor-editor",
     "productName": "Compressor Editor",
+    "afterPack": "./afterPack.js",
     "directories": {
       "buildResources": "build",
       "output": "release"
@@ -26,6 +27,7 @@
       "node_modules/ffmpeg-static/**"
     ],
     "mac": {
+      "identity": null,
       "target": [
         { "target": "dmg", "arch": ["arm64", "x64"] }
       ],
