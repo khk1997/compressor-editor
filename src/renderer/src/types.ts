@@ -1,10 +1,20 @@
-export type SourceType = 'sequence' | 'video'
+export type SourceType = 'sequence' | 'video' | 'batch'
+
+/** Upstream source info synced into Crop/Trim nodes so they can show a preview. */
+export interface UpstreamSrc {
+  /** How to fetch a preview frame; null when no input is connected. */
+  srcKind?: 'video' | 'sequence' | null
+  /** A video file path, or a sequence folder path. */
+  srcPath?: string | null
+  srcWidth?: number | null
+  srcHeight?: number | null
+}
 /** Output container. The actual video codec is chosen separately (see VideoCodec). */
 export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm'
 /** Video codec. Which ones are valid depends on the container (see FORMAT_CODECS). */
 export type VideoCodec = 'h264' | 'h265' | 'av1' | 'prores'
 
-export interface TrimNodeData {
+export interface TrimNodeData extends UpstreamSrc {
   /** Start time in seconds. */
   startSec: number
   /** End time in seconds; null = to the end. */
@@ -12,7 +22,7 @@ export interface TrimNodeData {
   [key: string]: unknown
 }
 
-export interface CropNodeData {
+export interface CropNodeData extends UpstreamSrc {
   x: number
   y: number
   /** Crop width/height in px; 0 = inactive. */
@@ -88,6 +98,8 @@ export interface RetimeNodeData {
 export interface InputNodeData {
   sourceType: SourceType
   path: string | null
+  /** Batch mode: the video files discovered in the chosen folder. */
+  batchFiles?: string[] | null
   /** Sequence: chosen frame rate. Video: optional fps override (null = keep source). */
   fps: number | null
   /** Probed source info for a video, shown to the user (null = unknown / probing). */

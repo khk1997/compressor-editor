@@ -1,8 +1,16 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'path'
-import { runJob, probeMedia, probeSequence, type Job } from './ffmpeg'
+import {
+  runJob,
+  probeMedia,
+  probeSequence,
+  thumbnail,
+  listVideosInFolder,
+  type Job,
+  type ThumbnailRequest
+} from './ffmpeg'
 
 /** Tracks the in-flight batch so it can be cancelled. */
 let activeRun: { kill: () => void; cancelled: boolean } | null = null
@@ -58,6 +66,22 @@ app.whenReady().then(() => {
 
   ipcMain.handle('media:probe', (_e, file: string) => probeMedia(file))
   ipcMain.handle('media:probeSequence', (_e, folder: string) => probeSequence(folder))
+  ipcMain.handle('media:listVideos', (_e, folder: string) => listVideosInFolder(folder))
+  ipcMain.handle('media:thumbnail', (_e, req: ThumbnailRequest) => thumbnail(req))
+
+  // Identify a dropped path: folder of videos (batch), PNG sequence, or a video file.
+  ipcMain.handle('media:inspectPath', async (_e, p: string) => {
+    try {
+      if (statSync(p).isDirectory()) {
+        const videos = listVideosInFolder(p)
+        if (videos.length) return { kind: 'batch' as const, videos }
+        return { kind: 'sequence' as const, info: await probeSequence(p) }
+      }
+    } catch {
+      return { kind: 'unknown' as const }
+    }
+    return { kind: 'video' as const, info: await probeMedia(p) }
+  })
 
   // --- Reveal a finished file in Finder / Explorer ---
   ipcMain.handle('shell:reveal', (_e, p: string) => {

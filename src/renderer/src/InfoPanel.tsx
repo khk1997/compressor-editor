@@ -12,7 +12,7 @@ import {
 const NODE_INFO: Record<string, { title: string; desc: string }> = {
   'input-node': {
     title: 'Input · 輸入',
-    desc: '選擇來源:PNG 序列(資料夾)或影片檔。序列需設定 fps;影片會自動偵測 fps、解析度、時長與音軌。'
+    desc: '選擇來源:PNG 序列(資料夾)、單一影片檔,或 Batch(整個資料夾的影片,套同一條 pipeline 各自輸出)。也可直接把檔案/資料夾拖進畫布自動建立。序列需設定 fps;影片會自動偵測資訊並顯示預覽縮圖。Batch 需搭配 Location 節點或已選輸出資料夾。'
   },
   'retime-node': {
     title: 'Retime · 變速',
@@ -24,7 +24,7 @@ const NODE_INFO: Record<string, { title: string; desc: string }> = {
   },
   'crop-node': {
     title: 'Crop · 裁切',
-    desc: '裁切畫面區域。Width/Height 是裁切後尺寸,X/Y 是左上角起點(單位 px)。寬高都需 > 0 才生效。'
+    desc: '裁切畫面區域。接上 Input 後會顯示來源影格,可直接在預覽上拖曳/縮放選框,或用比例預設(1:1、16:9…)、置中、全幅。也可手動輸入 Width/Height/X/Y(px)。寬高都需 > 0 才生效。'
   },
   'output-node': {
     title: 'Output · 輸出',

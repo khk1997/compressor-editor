@@ -102,8 +102,71 @@ export function probeSequence(folder: string): Promise<SequenceInfo> {
   })
 }
 
-export type SourceType = 'sequence' | 'video'
+export type SourceType = 'sequence' | 'video' | 'batch'
 export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm'
+
+/** Video file extensions we accept as inputs (drag-drop, batch folders). */
+const VIDEO_EXT = /\.(mov|mp4|m4v|mkv|webm|avi)$/i
+
+/** Naturally-sorted absolute paths of the video files in a folder (batch input). */
+export function listVideosInFolder(folder: string): string[] {
+  try {
+    return readdirSync(folder)
+      .filter((f) => VIDEO_EXT.test(f))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map((f) => path.join(folder, f))
+  } catch {
+    return []
+  }
+}
+
+/** Spawn ffmpeg and resolve its full stdout as a Buffer (null on failure). */
+function runFfmpegCapture(args: string[]): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = []
+    const child = spawn(resolveFfmpegPath(), args)
+    child.stdout.on('data', (b: Buffer) => chunks.push(b))
+    child.stderr.on('data', () => {
+      /* ignore: ffmpeg prints stream info to stderr */
+    })
+    child.on('error', () => resolve(null))
+    child.on('close', (code) => resolve(code === 0 && chunks.length ? Buffer.concat(chunks) : null))
+  })
+}
+
+export interface ThumbnailRequest {
+  /** 'video' → seek into a file; 'sequence' → first PNG of a folder. */
+  kind: 'video' | 'sequence'
+  /** A video file path, or a sequence folder path. */
+  path: string
+  /** Seek time in seconds (video only). */
+  timeSec?: number
+  /** Longest edge of the returned image; the frame is scaled down to fit. */
+  maxWidth?: number
+}
+
+/**
+ * Extract a single frame as a base64 PNG data URL, scaled down to maxWidth.
+ * Used for in-node previews (Input / Crop / Trim). Returns null if extraction
+ * fails so callers can fall back to a placeholder — never throws.
+ */
+export async function thumbnail(req: ThumbnailRequest): Promise<string | null> {
+  const maxWidth = req.maxWidth ?? 320
+  // Only downscale (min with iw) so small sources aren't blown up.
+  const scale = `scale='min(${maxWidth},iw)':-1:flags=bilinear`
+  let args: string[]
+  if (req.kind === 'sequence') {
+    const first = listSequencePngs(req.path)[0]
+    if (!first) return null
+    args = ['-y', '-i', first, '-vf', scale, '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1']
+  } else {
+    // -ss before -i = fast (keyframe) seek; accurate enough for a preview.
+    const seek = req.timeSec && req.timeSec > 0 ? ['-ss', String(req.timeSec)] : []
+    args = ['-y', ...seek, '-i', req.path, '-vf', scale, '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1']
+  }
+  const buf = await runFfmpegCapture(args)
+  return buf ? `data:image/png;base64,${buf.toString('base64')}` : null
+}
 export type VideoCodec = 'h264' | 'h265' | 'av1' | 'prores'
 
 /** Software / hardware H.26x encoders per codec. */

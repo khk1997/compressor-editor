@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 export interface MediaInfo {
   fps: number | null
@@ -8,6 +8,20 @@ export interface MediaInfo {
   durationSec: number | null
   hasAudio: boolean
 }
+
+export interface ThumbnailRequest {
+  kind: 'video' | 'sequence'
+  path: string
+  timeSec?: number
+  maxWidth?: number
+}
+
+/** Result of inspecting a dropped path (folder of videos / PNG sequence / file). */
+export type InspectResult =
+  | { kind: 'batch'; videos: string[] }
+  | { kind: 'sequence'; info: SequenceInfo }
+  | { kind: 'video'; info: MediaInfo }
+  | { kind: 'unknown' }
 
 export interface SequenceInfo {
   frameCount: number
@@ -36,6 +50,13 @@ const api = {
   probeMedia: (file: string): Promise<MediaInfo> => ipcRenderer.invoke('media:probe', file),
   probeSequence: (folder: string): Promise<SequenceInfo> =>
     ipcRenderer.invoke('media:probeSequence', folder),
+  listVideos: (folder: string): Promise<string[]> =>
+    ipcRenderer.invoke('media:listVideos', folder),
+  thumbnail: (req: ThumbnailRequest): Promise<string | null> =>
+    ipcRenderer.invoke('media:thumbnail', req),
+  inspectPath: (p: string): Promise<InspectResult> => ipcRenderer.invoke('media:inspectPath', p),
+  /** Resolve a dropped File to its absolute filesystem path (sandbox-safe). */
+  pathForFile: (file: File): string => webUtils.getPathForFile(file),
   reveal: (p: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('shell:reveal', p),
   existing: (paths: string[]): Promise<string[]> => ipcRenderer.invoke('fs:existing', paths),
   saveGraph: (data: string): Promise<{ ok: boolean; path?: string }> =>

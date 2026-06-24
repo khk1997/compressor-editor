@@ -394,6 +394,106 @@ body,
 .hint-warn {
   color: var(--warn);
 }
+.hint-muted {
+  color: var(--muted);
+}
+
+/* Source-frame preview thumbnail (Input / Trim nodes). */
+.node-thumb {
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  display: block;
+  background: #000;
+  object-fit: contain;
+}
+
+/* Crop visual editor: image + draggable selection overlay. */
+.crop-preview {
+  position: relative;
+  border-radius: 6px;
+  overflow: hidden;
+  /* outline (not border) so the 1px frame doesn't shrink the content box — the
+     crop rect maps to the full DISPLAY_W, so all four edges must align to it. */
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+  background: #000;
+  align-self: center;
+  touch-action: none;
+  user-select: none;
+}
+.crop-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  pointer-events: none;
+}
+.crop-img-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+.crop-rect {
+  position: absolute;
+  border: 1.5px solid var(--accent);
+  background: rgba(79, 140, 255, 0.12);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  cursor: move;
+  box-sizing: border-box;
+}
+.crop-h {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  border: 1.5px solid #fff;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.crop-h-nw {
+  left: -6px;
+  top: -6px;
+  cursor: nwse-resize;
+}
+.crop-h-ne {
+  right: -6px;
+  top: -6px;
+  cursor: nesw-resize;
+}
+.crop-h-sw {
+  left: -6px;
+  bottom: -6px;
+  cursor: nesw-resize;
+}
+.crop-h-se {
+  right: -6px;
+  bottom: -6px;
+  cursor: nwse-resize;
+}
+
+/* Preset / action chip rows (Crop). */
+.crop-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chip {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+.chip:hover {
+  border-color: var(--accent);
+}
 .hint-err {
   color: var(--err);
   word-break: break-word;

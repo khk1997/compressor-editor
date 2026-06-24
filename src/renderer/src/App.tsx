@@ -23,15 +23,26 @@ import { LocationNode } from './nodes/LocationNode'
 import { InfoPanel } from './InfoPanel'
 import {
   FORMAT_CODECS,
+  FORMAT_EXT,
   supportsTarget,
   type CropNodeData,
   type InputNodeData,
+  type JobState,
   type LocationNodeData,
   type OutputFormat,
   type OutputNodeData,
   type RetimeNodeData,
   type TrimNodeData
 } from './types'
+
+const basename = (p: string): string => p.split(/[/\\]/).pop() || p
+const dirname = (p: string): string => {
+  const parts = p.split(/[/\\]/)
+  parts.pop()
+  return parts.join('/')
+}
+/** Filename without its extension. */
+const stem = (p: string): string => basename(p).replace(/\.[^.]+$/, '')
 
 let idSeq = 1
 const nextId = (): string => `n${idSeq++}`
@@ -219,6 +230,11 @@ function Flow(): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
+  // Batch progress aggregation: base output id → per-file status (index → state).
+  const batchTotals = useRef<Map<string, number>>(new Map())
+  const batchParts = useRef<Map<string, { percent: number; status: string; message?: string }[]>>(
+    new Map()
+  )
 
   const nodeTypes = useMemo(
     () => ({
@@ -262,6 +278,56 @@ function Flow(): JSX.Element {
     }
   }, [edges, nodes, updateNodeData])
 
+  // Walk an edge chain backward (ignoring location edges) to the feeding Input node.
+  const resolveInputNode = useCallback(
+    (startId: string): Node | undefined => {
+      const byId = new Map(nodes.map((n) => [n.id, n]))
+      const incoming = (nodeId: string): Node | undefined => {
+        const e = edges.find((ed) => ed.target === nodeId && ed.targetHandle !== 'location')
+        return e ? byId.get(e.source) : undefined
+      }
+      let cur = incoming(startId)
+      let guard = 0
+      while (cur && cur.type !== 'input-node' && guard++ < 50) cur = incoming(cur.id)
+      return cur?.type === 'input-node' ? cur : undefined
+    },
+    [nodes, edges]
+  )
+
+  // Sync upstream source info (kind/path/dimensions) into Crop & Trim nodes for previews.
+  useEffect(() => {
+    for (const node of nodes) {
+      if (node.type !== 'crop-node' && node.type !== 'trim-node') continue
+      const input = resolveInputNode(node.id)
+      const inData = input?.data as InputNodeData | undefined
+      let srcKind: 'video' | 'sequence' | null = null
+      let srcPath: string | null = null
+      if (inData) {
+        if (inData.sourceType === 'sequence') {
+          srcKind = 'sequence'
+          srcPath = inData.path
+        } else if (inData.sourceType === 'video') {
+          srcKind = 'video'
+          srcPath = inData.path
+        } else if (inData.sourceType === 'batch') {
+          srcKind = 'video'
+          srcPath = inData.batchFiles?.[0] ?? null
+        }
+      }
+      const srcWidth = inData?.detectedWidth ?? null
+      const srcHeight = inData?.detectedHeight ?? null
+      const d = node.data as CropNodeData & TrimNodeData
+      if (
+        d.srcKind !== srcKind ||
+        d.srcPath !== srcPath ||
+        d.srcWidth !== srcWidth ||
+        d.srcHeight !== srcHeight
+      ) {
+        updateNodeData(node.id, { srcKind, srcPath, srcWidth, srcHeight })
+      }
+    }
+  }, [nodes, edges, resolveInputNode, updateNodeData])
+
   // Blender-style: drop a processing node onto a link to splice it in.
   const PROCESSING = ['retime-node', 'trim-node', 'crop-node']
   const onNodeDragStop = useCallback(
@@ -304,7 +370,41 @@ function Flow(): JSX.Element {
   // Subscribe to job status / log streams from the main process.
   useEffect(() => {
     const offStatus = window.api.onJobStatus((s) => {
-      updateNodeData(s.id, { status: s.status, percent: s.percent, message: s.message })
+      // Batch jobs use ids like `out3::2`; fold their per-file status into the one node.
+      const sep = s.id.indexOf('::')
+      if (sep < 0) {
+        updateNodeData(s.id, { status: s.status, percent: s.percent, message: s.message })
+        if (s.status === 'error' && s.message) {
+          setLogs((l) => [...l, `[${s.id}] ERROR: ${s.message}`])
+        }
+        return
+      }
+      const base = s.id.slice(0, sep)
+      const idx = Number(s.id.slice(sep + 2))
+      const parts = batchParts.current.get(base) ?? []
+      parts[idx] = { percent: s.percent, status: s.status, message: s.message }
+      batchParts.current.set(base, parts)
+      const total = batchTotals.current.get(base) ?? parts.filter(Boolean).length
+      const present = parts.filter(Boolean)
+      const done = present.filter((p) => p.status === 'done').length
+      const errs = present.filter((p) => p.status === 'error')
+      const anyRunning = present.some((p) => p.status === 'running')
+      const percent =
+        present.reduce((a, p) => a + (p.status === 'done' ? 1 : p.status === 'running' ? p.percent : 0), 0) /
+        Math.max(total, 1)
+      let status: JobState = 'running'
+      let message: string | undefined = `${done}/${total} done`
+      if (present.length >= total && !anyRunning) {
+        if (errs.length) {
+          status = 'error'
+          message = `${errs.length}/${total} failed. First: ${errs[0].message ?? 'error'}`
+        } else if (done >= total) {
+          status = 'done'
+        } else {
+          status = 'idle' // cancelled mid-batch
+        }
+      }
+      updateNodeData(base, { status, percent, message })
       if (s.status === 'error' && s.message) {
         setLogs((l) => [...l, `[${s.id}] ERROR: ${s.message}`])
       }
@@ -475,6 +575,7 @@ function Flow(): JSX.Element {
 
       const inData = src.data as InputNodeData
       const outData = out.data as OutputNodeData
+      const isBatch = inData.sourceType === 'batch'
 
       if (!inData.path) {
         problems.push(`${out.id}: input has no source selected`)
@@ -482,18 +583,17 @@ function Flow(): JSX.Element {
       }
 
       // Resolve final output path: location node dir + filename, or direct full path.
+      // Batch derives a filename per source file, so it only needs a directory.
       const locationDir = outData.locationDir ?? null
       let resolvedOutputPath: string | null = outData.outputPath
       if (locationDir) {
-        const filename = outData.outputPath
-          ? outData.outputPath.split(/[/\\]/).pop() || outData.outputPath
-          : null
-        if (!filename) {
+        const filename = outData.outputPath ? basename(outData.outputPath) : null
+        if (!isBatch && !filename) {
           problems.push(`${out.id}: location connected but no filename set`)
           continue
         }
-        resolvedOutputPath = `${locationDir}/${filename}`
-      } else if (!outData.outputPath) {
+        if (filename) resolvedOutputPath = `${locationDir}/${filename}`
+      } else if (!isBatch && !outData.outputPath) {
         problems.push(`${out.id}: no output file chosen`)
         continue
       }
@@ -502,6 +602,10 @@ function Flow(): JSX.Element {
       // (Sequences derive their duration from frame count in the main process.)
       const isTarget = supportsTarget(outData.format, outData.codec) && outData.sizeMode === 'target'
       if (isTarget) {
+        if (isBatch) {
+          problems.push(`${out.id}: target file size isn't supported for Batch — use Quality`)
+          continue
+        }
         if (!outData.targetMB || outData.targetMB <= 0) {
           problems.push(`${out.id}: target size (MB) not set`)
           continue
@@ -510,6 +614,55 @@ function Flow(): JSX.Element {
           problems.push(`${out.id}: source duration unknown — cannot hit a target size`)
           continue
         }
+      }
+
+      const baseOutput = {
+        format: outData.format,
+        codec: outData.codec,
+        quality: outData.quality,
+        sizeMode: outData.sizeMode,
+        targetMB: outData.targetMB,
+        hardware: outData.hardware,
+        proresProfile: outData.proresProfile,
+        hevcAlpha: outData.hevcAlpha,
+        width: outData.width
+      }
+      const retimeSpec = retime
+        ? { speed: retime.speed, reverse: retime.reverse, interpolation: retime.interpolation }
+        : null
+      const trimSpec = trim ? { startSec: trim.startSec, endSec: trim.endSec } : null
+      const cropSpec = crop ? { x: crop.x, y: crop.y, width: crop.width, height: crop.height } : null
+
+      if (isBatch) {
+        const files = inData.batchFiles ?? []
+        if (!files.length) {
+          problems.push(`${out.id}: batch folder has no video files`)
+          continue
+        }
+        const dir = locationDir ?? (outData.outputPath ? dirname(outData.outputPath) : null)
+        if (!dir) {
+          problems.push(`${out.id}: batch needs a Location node or a chosen output folder`)
+          continue
+        }
+        const ext = FORMAT_EXT[outData.format]
+        files.forEach((file, i) => {
+          jobs.push({
+            id: `${out.id}::${i}`,
+            input: {
+              type: 'video',
+              path: file,
+              fps: inData.fps, // null = keep each source's own rate
+              sourceFps: inData.detectedFps, // representative (from sampled first file)
+              durationSec: null, // per-file unknown; ffmpeg parses it live for progress
+              hasAudio: inData.detectedHasAudio // assumes a uniform batch
+            },
+            output: { ...baseOutput, outputPath: `${dir}/${stem(file)}.${ext}` },
+            retime: retimeSpec,
+            trim: trimSpec,
+            crop: cropSpec
+          })
+        })
+        continue
       }
 
       const seqFps = inData.fps ?? 30
@@ -524,23 +677,10 @@ function Flow(): JSX.Element {
           durationSec: inData.detectedDuration,
           hasAudio: inData.detectedHasAudio
         },
-        output: {
-          format: outData.format,
-          codec: outData.codec,
-          quality: outData.quality,
-          sizeMode: outData.sizeMode,
-          targetMB: outData.targetMB,
-          hardware: outData.hardware,
-          proresProfile: outData.proresProfile,
-          hevcAlpha: outData.hevcAlpha,
-          width: outData.width,
-          outputPath: resolvedOutputPath as string
-        },
-        retime: retime
-          ? { speed: retime.speed, reverse: retime.reverse, interpolation: retime.interpolation }
-          : null,
-        trim: trim ? { startSec: trim.startSec, endSec: trim.endSec } : null,
-        crop: crop ? { x: crop.x, y: crop.y, width: crop.width, height: crop.height } : null
+        output: { ...baseOutput, outputPath: resolvedOutputPath as string },
+        retime: retimeSpec,
+        trim: trimSpec,
+        crop: cropSpec
       })
     }
     return { jobs, problems }
@@ -566,8 +706,19 @@ function Flow(): JSX.Element {
         return
       }
     }
-    // Reset connected outputs to a running state.
-    jobs.forEach((j) => updateNodeData(j.id, { status: 'idle', percent: 0, message: undefined }))
+    // Seed batch aggregation (base output id → file count) and clear prior parts.
+    batchTotals.current.clear()
+    batchParts.current.clear()
+    for (const j of jobs) {
+      const sep = j.id.indexOf('::')
+      if (sep >= 0) {
+        const base = j.id.slice(0, sep)
+        batchTotals.current.set(base, (batchTotals.current.get(base) ?? 0) + 1)
+      }
+    }
+    // Reset each output node (dedupe batch's per-file ids back to the base id).
+    const baseIds = new Set(jobs.map((j) => (j.id.includes('::') ? j.id.split('::')[0] : j.id)))
+    baseIds.forEach((bid) => updateNodeData(bid, { status: 'idle', percent: 0, message: undefined }))
     setRunning(true)
     setLogs((l) => [...l, `▶ Running ${jobs.length} job(s)…`])
     const r = await window.api.runJobs(jobs)
@@ -590,6 +741,84 @@ function Flow(): JSX.Element {
     const r = await window.api.saveGraph(JSON.stringify({ nodes: clean, edges }, null, 2))
     if (r.ok) setLogs((l) => [...l, `💾 Saved graph to ${r.path}`])
   }
+
+  // Drag files/folders onto the canvas to spawn pre-filled Input nodes.
+  const onDragOverCanvas = useCallback((e: React.DragEvent): void => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }, [])
+
+  const onDropFiles = useCallback(
+    async (e: React.DragEvent): Promise<void> => {
+      e.preventDefault()
+      const files = Array.from(e.dataTransfer?.files ?? [])
+      if (!files.length) return
+      const drop = screenToFlowPosition({ x: e.clientX, y: e.clientY })
+      const blank: InputNodeData = {
+        sourceType: 'video',
+        path: null,
+        fps: null,
+        detectedFps: null,
+        detectedWidth: null,
+        detectedHeight: null,
+        detectedSize: null,
+        detectedDuration: null,
+        detectedHasAudio: false,
+        detectedFrames: null,
+        batchFiles: null
+      }
+      for (let i = 0; i < files.length; i++) {
+        const p = window.api.pathForFile(files[i])
+        if (!p) continue
+        const res = await window.api.inspectPath(p)
+        let data: InputNodeData | null = null
+        if (res.kind === 'video') {
+          data = {
+            ...blank,
+            sourceType: 'video',
+            path: p,
+            detectedFps: res.info.fps,
+            detectedWidth: res.info.width,
+            detectedHeight: res.info.height,
+            detectedSize: res.info.sizeBytes,
+            detectedDuration: res.info.durationSec,
+            detectedHasAudio: res.info.hasAudio
+          }
+        } else if (res.kind === 'sequence') {
+          data = {
+            ...blank,
+            sourceType: 'sequence',
+            path: p,
+            fps: 30,
+            detectedFrames: res.info.frameCount,
+            detectedWidth: res.info.width,
+            detectedHeight: res.info.height,
+            detectedSize: res.info.totalBytes
+          }
+        } else if (res.kind === 'batch') {
+          const info = res.videos[0] ? await window.api.probeMedia(res.videos[0]) : null
+          data = {
+            ...blank,
+            sourceType: 'batch',
+            path: p,
+            batchFiles: res.videos,
+            detectedFps: info?.fps ?? null,
+            detectedWidth: info?.width ?? null,
+            detectedHeight: info?.height ?? null,
+            detectedDuration: info?.durationSec ?? null,
+            detectedHasAudio: info?.hasAudio ?? false
+          }
+        } else {
+          setLogs((l) => [...l, `⚠ Skipped (unrecognized): ${p}`])
+          continue
+        }
+        const nodeData = data
+        const position = { x: drop.x, y: drop.y + i * 48 }
+        setNodes((n) => [...n, { id: nextId(), type: 'input-node', position, data: nodeData }])
+      }
+    },
+    [screenToFlowPosition, setNodes]
+  )
 
   const loadGraph = async (): Promise<void> => {
     const text = await window.api.loadGraph()
@@ -648,7 +877,7 @@ function Flow(): JSX.Element {
         )}
       </header>
 
-      <div className="canvas" ref={canvasRef}>
+      <div className="canvas" ref={canvasRef} onDrop={onDropFiles} onDragOver={onDragOverCanvas}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
