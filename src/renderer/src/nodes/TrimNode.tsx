@@ -16,6 +16,22 @@ export function TrimNode({ id, data }: NodeProps): JSX.Element {
   const d = data as TrimNodeData
   const { url: thumb } = useThumbnail(thumbReqFor(d))
 
+  const num = (v: string): number => Math.max(0, Math.floor(Number(v) || 0))
+  const dropFirst = d.dropFirst ?? 0
+  const dropLast = d.dropLast ?? 0
+  const total = d.srcFrames ?? null
+  const fps = d.srcFps ?? null
+
+  // Frame drops apply *after* the seconds trim, so count against that window.
+  let windowFrames = total
+  if (total != null && fps && fps > 0 && (d.startSec > 0 || d.endSec != null)) {
+    const dur = total / fps
+    const end = d.endSec != null ? Math.min(d.endSec, dur) : dur
+    windowFrames = Math.max(0, Math.round((end - d.startSec) * fps))
+  }
+  const outFrames = windowFrames != null ? windowFrames - dropFirst - dropLast : null
+  const tooMany = outFrames != null && outFrames < 1
+
   return (
     <div className="node node-trim">
       <Handle type="target" position={Position.Left} />
@@ -56,6 +72,41 @@ export function TrimNode({ id, data }: NodeProps): JSX.Element {
             }
           />
         </label>
+
+        <div className="hint hint-muted">Frame trim (e.g. drop the duplicate loop frame)</div>
+        <div className="field-grid">
+          <label className="field">
+            <span>Drop first (frames)</span>
+            <input
+              className="nodrag"
+              type="number"
+              min={0}
+              step={1}
+              placeholder="0"
+              value={dropFirst || ''}
+              onChange={(e) => updateNodeData(id, { dropFirst: num(e.target.value) })}
+            />
+          </label>
+          <label className="field">
+            <span>Drop last (frames)</span>
+            <input
+              className="nodrag"
+              type="number"
+              min={0}
+              step={1}
+              placeholder="0"
+              value={dropLast || ''}
+              onChange={(e) => updateNodeData(id, { dropLast: num(e.target.value) })}
+            />
+          </label>
+        </div>
+        {windowFrames != null && (dropFirst > 0 || dropLast > 0) && (
+          <div className={`hint ${tooMany ? 'hint-warn' : 'hint-muted'}`}>
+            {tooMany
+              ? `⚠ Dropping ${dropFirst + dropLast} of ${windowFrames} frames leaves nothing.`
+              : `Outputs ${outFrames} of ${windowFrames} frames`}
+          </div>
+        )}
       </div>
       <Handle type="source" position={Position.Right} />
     </div>

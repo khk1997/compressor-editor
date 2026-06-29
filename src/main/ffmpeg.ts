@@ -20,7 +20,10 @@ function ffmpegMajorVersion(bin: string): number {
   }
 }
 
-const SYSTEM_FF_PATHS = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']
+const SYSTEM_FF_PATHS =
+  process.platform === 'win32'
+    ? ['C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe', 'C:\\ffmpeg\\bin\\ffmpeg.exe']
+    : ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']
 
 /**
  * Resolve the ffmpeg binary.
@@ -47,10 +50,53 @@ export function resolveFfmpegPath(): string {
  * disposes each frame correctly. NOTE: a packaged build must bundle this binary.
  */
 export function resolveImg2webp(): string {
-  for (const p of ['/opt/homebrew/bin/img2webp', '/usr/local/bin/img2webp']) {
+  const paths =
+    process.platform === 'win32'
+      ? ['C:\\ProgramData\\chocolatey\\bin\\img2webp.exe', 'C:\\libwebp\\bin\\img2webp.exe']
+      : ['/opt/homebrew/bin/img2webp', '/usr/local/bin/img2webp']
+  for (const p of paths) {
     if (existsSync(p)) return p
   }
   return 'img2webp'
+}
+
+/** Cache of "does <binary> list <encoder>?" — probing spawns a process. */
+const encoderCache = new Map<string, boolean>()
+function hasEncoder(bin: string, encoder: string): boolean {
+  const key = `${bin}::SEP::${encoder}`
+  const cached = encoderCache.get(key)
+  if (cached !== undefined) return cached
+  let ok = false
+  try {
+    const r = spawnSync(bin, ['-hide_banner', '-encoders'], { encoding: 'utf8', timeout: 4000 })
+    ok = new RegExp(`^\\s*\\S+\\s+${encoder}\\b`, 'm').test(r.stdout || '')
+  } catch {
+    ok = false
+  }
+  encoderCache.set(key, ok)
+  return ok
+}
+
+/** Path to the bundled ffmpeg-static binary (unpacked from the asar in prod). */
+function bundledFfmpegPath(): string | null {
+  const p = ffmpegStatic ? ffmpegStatic.replace('app.asar', 'app.asar.unpacked') : null
+  return p && existsSync(p) ? p : null
+}
+
+/**
+ * Resolve an ffmpeg binary that can encode WebP. Homebrew's ffmpeg is often built
+ * without libwebp, so prefer whichever binary actually lists the encoder: the
+ * default choice if it has libwebp, otherwise the bundled ffmpeg-static (which
+ * always ships with it). Falls back to the default so the error stays clear.
+ */
+let _webpFfmpeg: string | undefined
+export function resolveWebpFfmpegPath(): string {
+  if (_webpFfmpeg) return _webpFfmpeg
+  const def = resolveFfmpegPath()
+  if (hasEncoder(def, 'libwebp')) return (_webpFfmpeg = def)
+  const bundled = bundledFfmpegPath()
+  if (bundled && hasEncoder(bundled, 'libwebp')) return (_webpFfmpeg = bundled)
+  return (_webpFfmpeg = def)
 }
 
 /** Naturally-sorted absolute paths of the PNG frames in a sequence folder. */
@@ -242,6 +288,10 @@ export interface RetimeSpec {
 export interface TrimSpec {
   startSec: number
   endSec: number | null
+  /** Frames to drop from the start (frame-accurate). */
+  dropFirst: number
+  /** Frames to drop from the end (frame-accurate). */
+  dropLast: number
 }
 
 export interface CropSpec {
@@ -269,6 +319,8 @@ export interface OutputSpec {
   codec: VideoCodec
   /** MOV + H.265 only: emit Apple "HEVC with Alpha" (forces VideoToolbox). */
   hevcAlpha: boolean
+  /** Audio bitrate in kbps (default 192). */
+  audioBitrate?: number
   outputPath: string
 }
 
@@ -290,7 +342,60 @@ function retimeActive(r: RetimeSpec | null): r is RetimeSpec {
 }
 
 function trimActive(t: TrimSpec | null): t is TrimSpec {
-  return !!t && (t.startSec > 0 || t.endSec != null)
+  return !!t && (t.startSec > 0 || t.endSec != null || t.dropFirst > 0 || t.dropLast > 0)
+}
+
+/** Source frame rate for frame↔seconds math (defaults to 30 when unknown). */
+function sourceFpsOf(input: InputSpec): number {
+  return (input.sourceFps && input.sourceFps > 0 ? input.sourceFps : input.fps) ?? 30
+}
+
+/** Best-effort total source frame count: exact for sequences, duration × fps for video. */
+function totalSourceFrames(input: InputSpec): number | null {
+  if (input.type === 'sequence') {
+    const n = countSequenceFrames(input.path)
+    return n > 0 ? n : null
+  }
+  if (input.durationSec && input.durationSec > 0 && input.sourceFps && input.sourceFps > 0) {
+    return Math.round(input.durationSec * input.sourceFps)
+  }
+  return null
+}
+
+/** True when the seconds (start/end) part of a trim is doing anything. */
+function secondsTrimActive(trim: TrimSpec): boolean {
+  return trim.startSec > 0 || trim.endSec != null
+}
+
+/**
+ * Frame count entering the frame-drop stage. Frame drops apply *after* the
+ * seconds trim, so this is the length of the seconds window (or the whole
+ * source when no seconds trim is set). null when it can't be determined.
+ */
+function framesInWindow(input: InputSpec, trim: TrimSpec): number | null {
+  if (!secondsTrimActive(trim)) return totalSourceFrames(input)
+  const dur = resolveDuration(input)
+  const end = trim.endSec != null ? trim.endSec : dur
+  if (end == null) return null
+  const fps = sourceFpsOf(input)
+  return Math.max(0, Math.round(end * fps) - Math.round(trim.startSec * fps))
+}
+
+/**
+ * Trim window in seconds for audio (which can't index video frames). Frame
+ * drops are *additive* on top of the seconds window: drop-first pushes the
+ * start later, drop-last pulls the end earlier, both by frames ÷ fps.
+ */
+function trimSeconds(input: InputSpec, trim: TrimSpec): { start: number; end: number | null } {
+  const fps = sourceFpsOf(input)
+  let start = trim.startSec
+  if (trim.dropFirst > 0) start += trim.dropFirst / fps
+  let end = trim.endSec
+  if (trim.dropLast > 0) {
+    const base = trim.endSec != null ? trim.endSec : resolveDuration(input)
+    if (base != null) end = base - trim.dropLast / fps
+  }
+  return { start, end }
 }
 
 function cropActive(c: CropSpec | null): c is CropSpec {
@@ -299,14 +404,15 @@ function cropActive(c: CropSpec | null): c is CropSpec {
 
 /** Output duration after trim + speed change (reverse does not change length). */
 function effectiveDuration(
-  durationSec: number | null,
+  input: InputSpec,
   retime: RetimeSpec | null,
   trim: TrimSpec | null
 ): number | null {
-  let d = durationSec
+  let d = resolveDuration(input)
   if (d && trimActive(trim)) {
-    const end = trim.endSec != null ? Math.min(trim.endSec, d) : d
-    d = Math.max(0, end - trim.startSec)
+    const { start, end } = trimSeconds(input, trim)
+    const e = end != null ? Math.min(end, d) : d
+    d = Math.max(0, e - start)
   }
   if (d && retime && retime.speed !== 100) d = d * (100 / retime.speed)
   return d
@@ -355,10 +461,28 @@ function buildFilters(
 ): string[] {
   const filters: string[] = []
 
-  // Trim first (resets the timeline to start at 0).
+  // Trim first (resets the timeline to start at 0). Seconds and frame drops are
+  // applied as two *sequential* stages, so they add up instead of fighting:
+  // stage 1 cuts the seconds window, stage 2 shaves exact frames off that result.
   if (trimActive(trim)) {
-    const end = trim.endSec != null ? `:end=${trim.endSec}` : ''
-    filters.push(`trim=start=${trim.startSec}${end}`, 'setpts=PTS-STARTPTS')
+    // Stage 1: seconds window.
+    if (secondsTrimActive(trim)) {
+      const p: string[] = []
+      if (trim.startSec > 0) p.push(`start=${trim.startSec}`)
+      if (trim.endSec != null) p.push(`end=${trim.endSec}`)
+      filters.push(`trim=${p.join(':')}`, 'setpts=PTS-STARTPTS')
+    }
+    // Stage 2: frame-accurate drops, relative to the (possibly trimmed) stream.
+    if (trim.dropFirst > 0 || trim.dropLast > 0) {
+      const framesIn = framesInWindow(input, trim)
+      const p: string[] = []
+      if (trim.dropFirst > 0) p.push(`start_frame=${trim.dropFirst}`)
+      if (trim.dropLast > 0 && framesIn != null) {
+        // end_frame is exclusive (first frame to drop); keep at least one frame.
+        p.push(`end_frame=${Math.max(trim.dropFirst + 1, framesIn - trim.dropLast)}`)
+      }
+      if (p.length) filters.push(`trim=${p.join(':')}`, 'setpts=PTS-STARTPTS')
+    }
   }
   if (cropActive(crop)) {
     filters.push(`crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`)
@@ -406,11 +530,17 @@ function atempoChain(tempo: number): string[] {
 }
 
 /** Audio filter string for trim + retime, or null if no audio change needed. */
-function buildAudioFilter(retime: RetimeSpec | null, trim: TrimSpec | null): string | null {
+function buildAudioFilter(
+  retime: RetimeSpec | null,
+  trim: TrimSpec | null,
+  input: InputSpec
+): string | null {
   const parts: string[] = []
   if (trimActive(trim)) {
-    const end = trim.endSec != null ? `:end=${trim.endSec}` : ''
-    parts.push(`atrim=start=${trim.startSec}${end}`, 'asetpts=PTS-STARTPTS')
+    // Audio can't trim by video-frame index, so fold frame drops into seconds.
+    const { start, end } = trimSeconds(input, trim)
+    const endStr = end != null ? `:end=${end}` : ''
+    parts.push(`atrim=start=${start}${endStr}`, 'asetpts=PTS-STARTPTS')
   }
   if (retimeActive(retime)) {
     if (retime.reverse) parts.push('areverse')
@@ -492,14 +622,16 @@ export function buildArgs(job: Job): string[] {
 
   if (filters.length) args.push('-vf', filters.join(','))
 
-  // Trim/retime audio (mp4/mov/webm/av1) so it stays in sync; webp has no audio.
+  // Audio (mp4/mov/webm/av1); webp has no audio. Re-encode at the chosen bitrate
+  // whenever a track is present — not just when trim/retime adds a filter — so the
+  // audio bitrate setting always takes effect. The trim/retime filter is layered on
+  // top only when needed (to keep audio in sync with the video edits).
   if (output.format !== 'webp' && input.hasAudio) {
-    const af = buildAudioFilter(retime, trim)
-    if (af) {
-      // WebM uses Opus; other containers use AAC.
-      const acodec = output.format === 'webm' ? 'libopus' : 'aac'
-      args.push('-af', af, '-c:a', acodec, '-b:a', '192k')
-    }
+    const af = buildAudioFilter(retime, trim, input)
+    const acodec = output.format === 'webm' ? 'libopus' : 'aac'
+    const abr = `${output.audioBitrate ?? 192}k`
+    if (af) args.push('-af', af)
+    args.push('-c:a', acodec, '-b:a', abr)
   }
 
   args.push(output.outputPath)
@@ -529,11 +661,12 @@ function runFfmpeg(
   base: number,
   span: number,
   cb: RunCallbacks,
-  onChild: (c: ChildProcessWithoutNullStreams) => void
+  onChild: (c: ChildProcessWithoutNullStreams) => void,
+  bin: string = resolveFfmpegPath()
 ): Promise<void> {
   cb.onLog(`$ ffmpeg ${args.join(' ')}`)
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(resolveFfmpegPath(), ['-progress', 'pipe:1', '-nostats', ...args])
+    const child = spawn(bin, ['-progress', 'pipe:1', '-nostats', ...args])
     onChild(child)
     let stderrTail = ''
     let localTotal = totalUs
@@ -607,8 +740,12 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
   }
 
   // Progress / bitrate use the *output* duration, which trim / speed alter.
-  const outDurationSec = effectiveDuration(resolveDuration(input), retime, trim)
+  const outDurationSec = effectiveDuration(input, retime, trim)
   const totalUs = outDurationSec ? outDurationSec * 1_000_000 : null
+
+  // WebP encoding needs the libwebp encoder, which Homebrew's ffmpeg often lacks;
+  // pick a binary that actually has it. Other formats use the default resolver.
+  const ffBin = output.format === 'webp' ? resolveWebpFfmpegPath() : resolveFfmpegPath()
 
   const useTarget =
     output.format === 'mp4' &&
@@ -703,7 +840,7 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
         } catch (err) {
           if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
             cb.onLog('⚠ img2webp not found; falling back to ffmpeg (transparent frames may stack).')
-            await runFfmpeg(buildArgs(job), totalUs, 0.4, 0.6, cb, setChild)
+            await runFfmpeg(buildArgs(job), totalUs, 0.4, 0.6, cb, setChild, ffBin)
           } else {
             throw err
           }
@@ -725,9 +862,10 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
       const vbps = computeVideoBitrate(output.targetMB!, outDurationSec!, input.hasAudio)
       const filters = buildFilters(input, output, retime, trim, crop)
       const vf = filters.length ? ['-vf', filters.join(',')] : []
-      const af = input.hasAudio ? buildAudioFilter(retime, trim) : null
+      const af = input.hasAudio ? buildAudioFilter(retime, trim, input) : null
+      const abr = `${output.audioBitrate ?? 192}k`
       const audioArgs = input.hasAudio
-        ? [...(af ? ['-af', af] : []), '-c:a', 'aac', '-b:a', '128k']
+        ? [...(af ? ['-af', af] : []), '-c:a', 'aac', '-b:a', abr]
         : ['-an']
       const args = [
         '-y',
@@ -756,7 +894,7 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
       const vbps = computeVideoBitrate(output.targetMB!, outDurationSec!, input.hasAudio)
       const filters = buildFilters(input, output, retime, trim, crop)
       const vf = filters.length ? ['-vf', filters.join(',')] : []
-      const af = input.hasAudio ? buildAudioFilter(retime, trim) : null
+      const af = input.hasAudio ? buildAudioFilter(retime, trim, input) : null
       const logPrefix = path.join(tmpdir(), `ffpass-${job.id}`)
       const nullDev = process.platform === 'win32' ? 'NUL' : '/dev/null'
       const common = [
@@ -773,8 +911,9 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
         ...vf
       ]
       const pass1 = ['-y', ...common, '-pass', '1', '-passlogfile', logPrefix, '-an', '-f', 'null', nullDev]
+      const abr2 = `${output.audioBitrate ?? 192}k`
       const audioArgs = input.hasAudio
-        ? [...(af ? ['-af', af] : []), '-c:a', 'aac', '-b:a', '128k']
+        ? [...(af ? ['-af', af] : []), '-c:a', 'aac', '-b:a', abr2]
         : ['-an']
       const pass2 = [
         '-y',
@@ -806,7 +945,7 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
       }
     })()
   } else {
-    promise = runFfmpeg(buildArgs(job), totalUs, 0, 1, cb, setChild).then(() => cb.onProgress(1))
+    promise = runFfmpeg(buildArgs(job), totalUs, 0, 1, cb, setChild, ffBin).then(() => cb.onProgress(1))
   }
 
   return { promise, kill: () => current?.kill('SIGKILL') }

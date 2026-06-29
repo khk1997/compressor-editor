@@ -8,6 +8,10 @@ export interface UpstreamSrc {
   srcPath?: string | null
   srcWidth?: number | null
   srcHeight?: number | null
+  /** Total source frame count (sequence: file count; video: duration × fps). null = unknown. */
+  srcFrames?: number | null
+  /** Source frame rate, used to convert frame drops to seconds for audio. */
+  srcFps?: number | null
 }
 /** Output container. The actual video codec is chosen separately (see VideoCodec). */
 export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm'
@@ -19,6 +23,10 @@ export interface TrimNodeData extends UpstreamSrc {
   startSec: number
   /** End time in seconds; null = to the end. */
   endSec: number | null
+  /** Frames to drop from the start (frame-accurate, on top of startSec). */
+  dropFirst?: number
+  /** Frames to drop from the end (e.g. 1 to remove a duplicate loop frame). */
+  dropLast?: number
   [key: string]: unknown
 }
 
@@ -134,6 +142,8 @@ export interface OutputNodeData {
   /** MOV + H.265 only: emit Apple "HEVC with Alpha" (forces VideoToolbox). */
   hevcAlpha: boolean
   width: number | null
+  /** Audio bitrate in kbps for formats that carry audio (default 192). */
+  audioBitrate?: number
   outputPath: string | null
   /** Directory override from a connected Location node; null = use outputPath as a full path. */
   locationDir?: string | null
@@ -150,4 +160,33 @@ export const FORMAT_EXT: Record<OutputFormat, string> = {
   mp4: 'mp4',
   mov: 'mov',
   webm: 'webm'
+}
+
+/** Renderer-side job payload sent over IPC to the main process. */
+export interface JobSpec {
+  id: string
+  input: {
+    type: string
+    path: string
+    fps: number | null
+    sourceFps: number | null
+    durationSec: number | null
+    hasAudio: boolean
+  }
+  output: {
+    format: string
+    codec: string
+    quality: number
+    sizeMode: string
+    targetMB: number | null
+    hardware: boolean
+    proresProfile: number
+    hevcAlpha: boolean
+    width: number | null
+    audioBitrate?: number
+    outputPath: string
+  }
+  retime: { speed: number; reverse: boolean; interpolation: string } | null
+  trim: { startSec: number; endSec: number | null; dropFirst: number; dropLast: number } | null
+  crop: { x: number; y: number; width: number; height: number } | null
 }

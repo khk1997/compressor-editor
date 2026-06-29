@@ -18,11 +18,42 @@ function basename(p: string): string {
   return p.split(/[/\\]/).pop() || p
 }
 
+const PRESETS: { label: string; value: string }[] = [
+  { label: '— Preset —', value: '' },
+  { label: 'Web 標準（H.264 MP4 75%）', value: 'web-h264' },
+  { label: '高品質存檔（ProRes HQ MOV）', value: 'prores-hq' },
+  { label: '透明動畫（WebP 80%）', value: 'webp-alpha' },
+  { label: '透明影片（WebM VP9 80%）', value: 'webm-alpha' },
+  { label: 'Apple Alpha（HEVC-with-Alpha MOV）', value: 'hevc-alpha' }
+]
+
+const PRESET_PATCH: Record<string, Partial<OutputNodeData>> = {
+  'web-h264': { format: 'mp4', codec: 'h264', quality: 75, sizeMode: 'quality', hardware: false, hevcAlpha: false },
+  'prores-hq': { format: 'mov', codec: 'prores', proresProfile: 3 },
+  'webp-alpha': { format: 'webp', quality: 80 },
+  'webm-alpha': { format: 'webm', quality: 80 },
+  'hevc-alpha': { format: 'mov', codec: 'h265', hevcAlpha: true, hardware: true, quality: 80 }
+}
+
+function applyPreset(
+  preset: string,
+  d: OutputNodeData,
+  id: string,
+  updateNodeData: ReturnType<typeof useReactFlow>['updateNodeData']
+): void {
+  const patch = PRESET_PATCH[preset]
+  if (!patch) return
+  // Keep the chosen filename's extension in sync with the preset's format
+  // (mirrors onFormat), so the output path doesn't end up with a stale ext.
+  const nextFormat = (patch.format ?? d.format) as OutputFormat
+  let outputPath = d.outputPath
+  if (outputPath) outputPath = outputPath.replace(/\.[^.]+$/, `.${FORMAT_EXT[nextFormat]}`)
+  updateNodeData(id, { ...patch, outputPath })
+}
 
 export function OutputNode({ id, data }: NodeProps): JSX.Element {
   const { updateNodeData } = useReactFlow()
   const d = data as OutputNodeData
-  // Graphs saved before the codec field existed default to the container's first codec.
   const codec: VideoCodec = d.codec ?? FORMAT_CODECS[d.format][0] ?? 'h264'
 
   const pickOutput = async (): Promise<void> => {
@@ -31,13 +62,10 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
   }
 
   const onFormat = (format: OutputFormat): void => {
-    // Keep the chosen output filename's extension in sync with the format.
     let outputPath = d.outputPath
     if (outputPath) outputPath = outputPath.replace(/\.[^.]+$/, `.${FORMAT_EXT[format]}`)
-    // Reset the codec to the new container's default if the current one isn't valid.
     const codecs = FORMAT_CODECS[format]
     const nextCodec = codecs.includes(codec) ? codec : (codecs[0] ?? codec)
-    // Target-size / hardware only apply to some format+codec combos; revert otherwise.
     const sizeMode = supportsTarget(format, nextCodec) ? d.sizeMode : 'quality'
     const hardware = supportsHardware(format, nextCodec) ? d.hardware : false
     updateNodeData(id, { format, codec: nextCodec, outputPath, sizeMode, hardware })
@@ -57,15 +85,13 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
   const targetMode = supportsTarget(d.format, codec) && d.sizeMode === 'target'
   const showHardware = supportsHardware(d.format, codec)
   const keepsAlpha = supportsAlpha(d.format, codec, d.proresProfile, hevcAlpha)
+  const hasAudio = d.format !== 'webp'
 
-  // hasLocation is true the moment a location node is wired up, even before a folder is picked.
   const hasLocation = !!d.locationConnected
   const ext = FORMAT_EXT[d.format]
-  // In location mode the user types only the stem; the extension is shown/managed separately.
   const displayStem = d.outputPath ? basename(d.outputPath).replace(/\.[^.]+$/, '') : ''
 
   const onFilenameStem = (stem: string): void => {
-    // Store the full filename (stem + current extension) so format changes & builds stay in sync.
     updateNodeData(id, { outputPath: stem ? `${stem}.${ext}` : null })
   }
 
@@ -80,6 +106,23 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
         <DeleteButton id={id} />
       </div>
       <div className="node-body">
+
+        {/* ── Preset quick-fill ─────────────────────────────────────────── */}
+        <label className="field">
+          <span>Preset</span>
+          <select
+            className="nodrag"
+            value=""
+            onChange={(e) => { if (e.target.value) applyPreset(e.target.value, d, id, updateNodeData) }}
+          >
+            {PRESETS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label className="field">
           <span>Format</span>
           <select
@@ -182,6 +225,27 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
           />
         </label>
 
+        {/* ── Audio bitrate ─────────────────────────────────────────────── */}
+        {hasAudio && (
+          <label className="field">
+            <span>Audio (kbps)</span>
+            <input
+              className="nodrag"
+              type="number"
+              min={64}
+              max={320}
+              step={32}
+              placeholder="192"
+              value={d.audioBitrate ?? ''}
+              onChange={(e) =>
+                updateNodeData(id, {
+                  audioBitrate: e.target.value ? Number(e.target.value) : undefined
+                })
+              }
+            />
+          </label>
+        )}
+
         {showHardware && (
           <label className="field-row">
             <input
@@ -221,8 +285,6 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
         )}
 
         <div className="output-dest">
-          {/* location handle lives here so it stays centered on the destination row.
-              left:-12 cancels node-body's padding so it sits on the node's left edge. */}
           <Handle
             type="target"
             id="location"
@@ -256,9 +318,10 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
           <button
             className="btn btn-pick nodrag"
             onClick={() => {
-              const fullPath = hasLocation && d.outputPath
-                ? `${d.locationDir}/${basename(d.outputPath)}`
-                : d.outputPath
+              const fullPath =
+                hasLocation && d.outputPath
+                  ? `${d.locationDir}/${basename(d.outputPath)}`
+                  : d.outputPath
               if (fullPath) window.api.reveal(fullPath)
             }}
           >
