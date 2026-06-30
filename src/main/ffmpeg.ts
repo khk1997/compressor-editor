@@ -50,6 +50,11 @@ export function resolveFfmpegPath(): string {
  * disposes each frame correctly. NOTE: a packaged build must bundle this binary.
  */
 export function resolveImg2webp(): string {
+  // Prefer the copy bundled into the app's Resources (with its dylibs), so
+  // transparent animated WebP works on machines without a Homebrew libwebp.
+  const bundledName = process.platform === 'win32' ? 'img2webp.exe' : 'img2webp'
+  const bundled = path.join(process.resourcesPath, 'img2webp', bundledName)
+  if (existsSync(bundled)) return bundled
   const paths =
     process.platform === 'win32'
       ? ['C:\\ProgramData\\chocolatey\\bin\\img2webp.exe', 'C:\\libwebp\\bin\\img2webp.exe']

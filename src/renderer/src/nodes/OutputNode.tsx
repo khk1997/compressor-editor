@@ -26,7 +26,9 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
   const codec: VideoCodec = d.codec ?? FORMAT_CODECS[d.format][0] ?? 'h264'
 
   const pickOutput = async (): Promise<void> => {
-    const path = await window.api.saveFile(`output.${FORMAT_EXT[d.format]}`)
+    // Pre-fill the dialog with the current filename so re-picking edits it,
+    // instead of resetting to "output.<ext>".
+    const path = await window.api.saveFile(d.outputPath ?? `output.${FORMAT_EXT[d.format]}`)
     if (path) updateNodeData(id, { outputPath: path })
   }
 
