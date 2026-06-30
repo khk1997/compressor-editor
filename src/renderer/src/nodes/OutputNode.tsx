@@ -50,6 +50,7 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
   }
 
   const codecChoices = FORMAT_CODECS[d.format]
+  const isPngSeq = d.format === 'pngseq'
   const isProres = d.format === 'mov' && codec === 'prores'
   const proresAlpha = isProres && d.proresProfile === 4
   const hevcAlphaAvail = supportsHevcAlpha(d.format, codec)
@@ -91,6 +92,7 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
             <option value="mp4">MP4</option>
             <option value="mov">MOV</option>
             <option value="webm">WebM (VP9)</option>
+            <option value="pngseq">PNG sequence</option>
           </select>
         </label>
 
@@ -125,7 +127,9 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
           </label>
         )}
 
-        {targetMode ? (
+        {isPngSeq ? (
+          <div className="hint hint-muted">無損逐格輸出 PNG，無音訊。畫質固定(不壓縮損失)。</div>
+        ) : targetMode ? (
           <label className="field">
             <span>Target size (MB)</span>
             <input
@@ -252,6 +256,12 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
           )}
         </div>
 
+        {isPngSeq && d.outputPath && (
+          <div className="hint hint-muted">
+            影格輸出到子資料夾 📁 {basename(d.outputPath).replace(/\.[^.]+$/, '')}/
+          </div>
+        )}
+
         {d.status === 'done' && (d.outputPath || hasLocation) && (
           <button
             className="btn btn-pick nodrag"
@@ -259,7 +269,9 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
               const fullPath = hasLocation && d.outputPath
                 ? `${d.locationDir}/${basename(d.outputPath)}`
                 : d.outputPath
-              if (fullPath) window.api.reveal(fullPath)
+              // PNG sequence frames live in a subfolder named after the file.
+              const target = isPngSeq && fullPath ? fullPath.replace(/\.[^.]+$/, '') : fullPath
+              if (target) window.api.reveal(target)
             }}
           >
             📂 Reveal in Finder

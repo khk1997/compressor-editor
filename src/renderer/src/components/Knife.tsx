@@ -3,14 +3,32 @@ import { useReactFlow } from '@xyflow/react'
 import { segCross, type Pt } from '../utils/geometry'
 
 /**
- * Blender-style knife: hold Ctrl/⌘ and drag across links to sever them.
- * Renders the cut stroke as an overlay and removes any edge it crosses.
+ * Blender-style knife: hold Ctrl/⌘ (or toggle scissor mode) and drag across
+ * links to sever them. Renders the cut stroke as an overlay and removes any
+ * edge it crosses.
+ *
+ * @param active   when true, a plain left-drag cuts (no modifier needed).
+ * @param onBeforeCut called once right before edges are removed, so the caller
+ *                    can snapshot undo history.
  */
-export function Knife({ wrapperRef }: { wrapperRef: React.RefObject<HTMLDivElement> }): JSX.Element {
+export function Knife({
+  wrapperRef,
+  active = false,
+  onBeforeCut
+}: {
+  wrapperRef: React.RefObject<HTMLDivElement>
+  active?: boolean
+  onBeforeCut?: () => void
+}): JSX.Element {
   const rf = useReactFlow()
   const [stroke, setStroke] = useState<Pt[]>([])
   const ptsRef = useRef<Pt[]>([])
   const cutting = useRef(false)
+  // Keep handlers (registered once) reading the latest props without re-binding.
+  const activeRef = useRef(active)
+  const onBeforeCutRef = useRef(onBeforeCut)
+  useEffect(() => { activeRef.current = active }, [active])
+  useEffect(() => { onBeforeCutRef.current = onBeforeCut }, [onBeforeCut])
 
   useEffect(() => {
     const el = wrapperRef.current
@@ -44,11 +62,14 @@ export function Knife({ wrapperRef }: { wrapperRef: React.RefObject<HTMLDivEleme
           }
         }
       }
-      if (remove.size) rf.setEdges((es) => es.filter((e) => !remove.has(e.id)))
+      if (remove.size) {
+        onBeforeCutRef.current?.()
+        rf.setEdges((es) => es.filter((e) => !remove.has(e.id)))
+      }
     }
 
     const down = (e: PointerEvent): void => {
-      if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return
+      if (!(e.ctrlKey || e.metaKey || activeRef.current) || e.button !== 0) return
       e.preventDefault()
       e.stopPropagation()
       cutting.current = true

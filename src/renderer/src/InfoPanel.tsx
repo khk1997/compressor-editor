@@ -37,14 +37,17 @@ const FORMAT_LABEL: Record<OutputFormat, string> = {
   webp: 'WebP(動畫)',
   mp4: 'MP4(容器)',
   mov: 'MOV(容器)',
-  webm: 'WebM(VP9)'
+  webm: 'WebM(VP9)',
+  pngseq: 'PNG 序列'
 }
 
 const FORMAT_INFO: Record<OutputFormat, string> = {
   webp: '動畫圖片格式,可保留透明 alpha。適合網頁短動畫、貼圖。無音訊。檔案通常比影片小但畫質有限。',
   mp4: '相容性最高的影片容器,幾乎所有裝置/瀏覽器都能播。可裝 H.264 / H.265 / AV1,用下面的 Codec 選擇。不支援透明。',
   mov: '剪輯用容器。預設 ProRes(高品質中間檔,檔案很大);也可改用 H.264 / H.265 壓成較小的檔案。用下面的 Codec 切換。',
-  webm: 'VP9。網頁友善,可保留透明 alpha(瀏覽器可解),壓縮率優於 H.264。編碼較慢。Safari 舊版支援有限。'
+  webm: 'VP9。網頁友善,可保留透明 alpha(瀏覽器可解),壓縮率優於 H.264。編碼較慢。Safari 舊版支援有限。',
+  pngseq:
+    '把影片/序列逐格輸出成 PNG 圖檔(無損、保留透明 alpha、無音訊)。影格會放進以檔名命名的子資料夾(如 frames/frames_00001.png)。適合丟進其他軟體做後續處理、修圖或重新合成。檔案總量通常很大。'
 }
 
 /** Per-codec guidance, shown for whichever codecs the chosen container offers. */

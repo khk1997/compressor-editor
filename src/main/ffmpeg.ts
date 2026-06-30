@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { existsSync, readdirSync, statSync, rmSync, mkdtempSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, rmSync, mkdtempSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import ffmpegStatic from 'ffmpeg-static'
@@ -149,7 +149,20 @@ export function probeSequence(folder: string): Promise<SequenceInfo> {
 }
 
 export type SourceType = 'sequence' | 'video' | 'batch'
-export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm'
+export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm' | 'pngseq'
+
+/**
+ * Map a chosen `.png` destination to a PNG-sequence output: frames go into a
+ * sibling subfolder named after the file, as `<stem>/<stem>_%05d.png`. Keeps the
+ * frames grouped instead of littering the chosen folder, and lets the rest of the
+ * app keep treating the destination as a single path.
+ */
+export function pngSeqOutput(outputPath: string): { dir: string; pattern: string } {
+  const ext = path.extname(outputPath)
+  const stem = path.basename(outputPath, ext)
+  const dir = path.join(path.dirname(outputPath), stem)
+  return { dir, pattern: path.join(dir, `${stem}_%05d.png`) }
+}
 
 /** Video file extensions we accept as inputs (drag-drop, batch folders). */
 const VIDEO_EXT = /\.(mov|mp4|m4v|mkv|webm|avi)$/i
@@ -592,6 +605,13 @@ export function buildArgs(job: Job): string[] {
       }
       break
     }
+    case 'pngseq': {
+      // Lossless PNG image sequence. PNG keeps an alpha channel, so don't force a
+      // pixel format — let the source's (rgb24 / rgba) pass through. No audio.
+      // Frame numbering starts at 0 to mirror the import side's expectations.
+      args.push('-c:v', 'png', '-start_number', '0', '-an')
+      break
+    }
     case 'webm': {
       // VP9 constant-quality (CRF + -b:v 0). 100 → crf 15, 0 → crf 45.
       // yuva420p + `-auto-alt-ref 0` preserves the alpha channel (stored as a
@@ -626,7 +646,7 @@ export function buildArgs(job: Job): string[] {
   // whenever a track is present — not just when trim/retime adds a filter — so the
   // audio bitrate setting always takes effect. The trim/retime filter is layered on
   // top only when needed (to keep audio in sync with the video edits).
-  if (output.format !== 'webp' && input.hasAudio) {
+  if (output.format !== 'webp' && output.format !== 'pngseq' && input.hasAudio) {
     const af = buildAudioFilter(retime, trim, input)
     const acodec = output.format === 'webm' ? 'libopus' : 'aac'
     const abr = `${output.audioBitrate ?? 192}k`
@@ -634,7 +654,7 @@ export function buildArgs(job: Job): string[] {
     args.push('-c:a', acodec, '-b:a', abr)
   }
 
-  args.push(output.outputPath)
+  args.push(output.format === 'pngseq' ? pngSeqOutput(output.outputPath).pattern : output.outputPath)
   return args
 }
 
@@ -757,6 +777,11 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
 
   // PNG sequence → WebP must go through img2webp for correct frame disposal.
   const useSequenceWebp = input.type === 'sequence' && output.format === 'webp'
+
+  // image2 muxer won't create directories — make the per-output frame folder first.
+  if (output.format === 'pngseq') {
+    mkdirSync(pngSeqOutput(output.outputPath).dir, { recursive: true })
+  }
 
   let promise: Promise<void>
 

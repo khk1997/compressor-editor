@@ -22,6 +22,7 @@ import { CropNode } from './nodes/CropNode'
 import { LocationNode } from './nodes/LocationNode'
 import { InfoPanel } from './InfoPanel'
 import { Knife } from './components/Knife'
+import { Toolbar } from './components/Toolbar'
 import { useJobRunner } from './hooks/useJobRunner'
 import { useUpstreamSync } from './hooks/useUpstreamSync'
 import { useHistory } from './hooks/useHistory'
@@ -125,6 +126,8 @@ function Flow(): JSX.Element {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const { updateNodeData, screenToFlowPosition, getNodes } = useReactFlow()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [cutMode, setCutMode] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
 
@@ -379,6 +382,51 @@ function Flow(): JSX.Element {
     ])
   }
 
+  // One-click wire the selected node to every Output on the canvas, skipping
+  // links that already exist. A Location node feeds each Output's "save as"
+  // (location handle); any other node feeds each Output's normal input.
+  const connectSelectedToOutputs = (): void => {
+    const src = nodes.find((n) => n.id === selectedId)
+    if (!src || src.type === 'output-node') return
+    const outputs = nodes.filter((n) => n.type === 'output-node')
+
+    if (src.type === 'location-node') {
+      // An Output's location handle holds one connection — skip Outputs that
+      // already have any Location wired in to avoid double-binding the handle.
+      const taken = new Set(edges.filter((e) => e.targetHandle === 'location').map((e) => e.target))
+      const added = outputs
+        .filter((o) => !taken.has(o.id))
+        .map((o) => ({
+          id: `e-${src.id}-${o.id}-loc`,
+          source: src.id,
+          target: o.id,
+          targetHandle: 'location'
+        }))
+      if (!added.length) {
+        setLogs((l) => [...l, '⚠ 沒有可連接的 Output(可能都已設定 Save as 位置)。'])
+        return
+      }
+      pushHistory()
+      setEdges((eds) => [...eds, ...added])
+      setLogs((l) => [...l, `📁 已把 Location 連到 ${added.length} 個 Output 的 Save as。`])
+      return
+    }
+
+    const existing = new Set(
+      edges.filter((e) => e.source === src.id && e.targetHandle == null).map((e) => e.target)
+    )
+    const added = outputs
+      .filter((o) => !existing.has(o.id))
+      .map((o) => ({ id: `e-${src.id}-${o.id}`, source: src.id, target: o.id }))
+    if (!added.length) {
+      setLogs((l) => [...l, '⚠ 沒有可連接的 Output(可能都已連上或畫布上沒有 Output)。'])
+      return
+    }
+    pushHistory()
+    setEdges((eds) => [...eds, ...added])
+    setLogs((l) => [...l, `🔗 已連到 ${added.length} 個 Output。`])
+  }
+
   // ── Run / stop ────────────────────────────────────────────────────────────
   const run = async (): Promise<void> => {
     const { jobs, problems } = buildJobs(nodes, edges)
@@ -529,48 +577,42 @@ function Flow(): JSX.Element {
   )
 
   // ── Render ────────────────────────────────────────────────────────────────
+  const selectedNode = nodes.find((n) => n.id === selectedId)
+  const canConnectToOutputs = !!selectedNode && selectedNode.type !== 'output-node'
+  const isLocationSelected = selectedNode?.type === 'location-node'
+  const connectLabel = isLocationSelected ? '⤳ 連到所有 Save as' : '⤳ 連到所有 Output'
+  const connectTitle = isLocationSelected
+    ? '把這個 Location 連到所有 Output 的 Save as(輸出位置)'
+    : '把選取的節點連到畫布上所有 Output'
+
   return (
     <div className="app">
-      <header className="toolbar">
-        <strong className="brand">⬡ Compressor</strong>
-        <button className="btn" onClick={addInput}>
-          + Input
-        </button>
-        <button className="btn" onClick={addRetime}>
-          + Retime
-        </button>
-        <button className="btn" onClick={addTrim}>
-          + Trim
-        </button>
-        <button className="btn" onClick={addCrop}>
-          + Crop
-        </button>
-        <button className="btn" onClick={addOutput}>
-          + Output
-        </button>
-        <button className="btn" onClick={addLocation}>
-          + Location
-        </button>
-        <span className="sep" />
-        <button className="btn" onClick={saveGraph}>
-          Save
-        </button>
-        <button className="btn" onClick={loadGraph}>
-          Open
-        </button>
-        <div className="spacer" />
-        {running ? (
-          <button className="btn btn-stop" onClick={stop}>
-            ■ Stop
-          </button>
-        ) : (
-          <button className="btn btn-run" onClick={run}>
-            ▶ Run
-          </button>
-        )}
-      </header>
+      <Toolbar
+        cutMode={cutMode}
+        onToggleCut={() => setCutMode((v) => !v)}
+        canConnectToOutputs={canConnectToOutputs}
+        onConnectToOutputs={connectSelectedToOutputs}
+        connectLabel={connectLabel}
+        connectTitle={connectTitle}
+        running={running}
+        onRun={run}
+        onStop={stop}
+        onAddInput={addInput}
+        onAddRetime={addRetime}
+        onAddTrim={addTrim}
+        onAddCrop={addCrop}
+        onAddOutput={addOutput}
+        onAddLocation={addLocation}
+        onSave={saveGraph}
+        onOpen={loadGraph}
+      />
 
-      <div className="canvas" ref={canvasRef} onDrop={onDropFiles} onDragOver={onDragOverCanvas}>
+      <div
+        className={`canvas${cutMode ? ' canvas-cut' : ''}`}
+        ref={canvasRef}
+        onDrop={onDropFiles}
+        onDragOver={onDragOverCanvas}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -591,8 +633,47 @@ function Flow(): JSX.Element {
           <MiniMap pannable zoomable />
           <Controls />
         </ReactFlow>
-        <Knife wrapperRef={canvasRef} />
-        <InfoPanel node={nodes.find((n) => n.id === selectedId)} />
+        <Knife wrapperRef={canvasRef} active={cutMode} onBeforeCut={pushHistory} />
+        <InfoPanel node={selectedNode} />
+
+        {helpOpen ? (
+          <div className="shortcuts shortcuts-open">
+            <div className="shortcuts-head">
+              <span>快捷鍵</span>
+              <button className="shortcuts-toggle" onClick={() => setHelpOpen(false)} title="收合">
+                ×
+              </button>
+            </div>
+            <ul className="shortcuts-list">
+              <li>
+                <b>切斷連線</b>:按住 Ctrl/⌘ 拖曳劃過連線,或開啟工具列「✂ 剪刀」後直接拖曳
+              </li>
+              <li>
+                <b>刪除節點/連線</b>:選取後按 Delete / Backspace / X
+              </li>
+              <li>
+                <b>復原 / 重做</b>:⌘Z / ⇧⌘Z
+              </li>
+              <li>
+                <b>插入處理節點</b>:把 Retime/Trim/Crop 拖到一條連線上即自動串接
+              </li>
+              <li>
+                <b>加入來源</b>:把影片/序列資料夾拖進畫布
+              </li>
+              <li>
+                <b>連到所有 Output</b>:選取節點後按工具列按鈕一鍵串接;選 Location 節點時則連到所有 Output 的 Save as
+              </li>
+            </ul>
+          </div>
+        ) : (
+          <button
+            className="shortcuts shortcuts-closed"
+            onClick={() => setHelpOpen(true)}
+            title="快捷鍵說明"
+          >
+            ?
+          </button>
+        )}
       </div>
 
       <div className="logpanel" ref={logRef}>

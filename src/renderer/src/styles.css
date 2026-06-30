@@ -44,6 +44,64 @@ body,
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
+  position: relative; /* anchor for the off-screen measure row + overflow menu */
+}
+
+/* AE-style overflow menu: buttons that don't fit collapse into a "»" dropdown. */
+.toolbar-more {
+  position: relative;
+  flex-shrink: 0;
+}
+.toolbar-more-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+.toolbar-more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 31;
+  min-width: 160px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+.toolbar-more-item .btn {
+  width: 100%;
+  text-align: left;
+  border-color: transparent;
+  background: transparent;
+}
+.toolbar-more-item .btn:hover:not(:disabled) {
+  background: var(--panel-2);
+  border-color: var(--border);
+}
+.toolbar-more-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 2px;
+}
+/* Off-screen measuring row — never visible, just used to read natural widths.
+   Clipped so its overflow can't add a page-level horizontal scrollbar; child
+   getBoundingClientRect still reports each button's true (unclipped) width. */
+.toolbar-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: 100%;
+  overflow: hidden;
+  display: flex;
+  gap: 8px;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
 }
 .toolbar .btn {
   -webkit-app-region: no-drag;
@@ -52,6 +110,8 @@ body,
   margin-right: 10px;
   color: var(--accent);
   letter-spacing: 0.3px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .spacer {
   flex: 1;
@@ -65,6 +125,8 @@ body,
   padding: 6px 12px;
   cursor: pointer;
   font-size: 12px;
+  white-space: nowrap; /* never wrap label text into a vertical column */
+  flex-shrink: 0;
 }
 .btn:hover {
   border-color: var(--accent);
@@ -72,6 +134,16 @@ body,
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.btn-active {
+  background: var(--err);
+  border-color: var(--err);
+  color: #fff;
+  font-weight: 600;
+}
+.btn-active:hover {
+  border-color: var(--err);
+  filter: brightness(1.1);
 }
 .btn-run {
   background: var(--accent);
@@ -94,11 +166,19 @@ body,
   height: 22px;
   background: var(--border);
   margin: 0 4px;
+  flex-shrink: 0;
 }
 
 .canvas {
   position: relative;
   min-height: 0;
+}
+/* Scissor mode: crosshair everywhere so it's clear a drag will cut links. */
+.canvas-cut,
+.canvas-cut .react-flow__pane,
+.canvas-cut .react-flow__node,
+.canvas-cut .react-flow__edge {
+  cursor: crosshair !important;
 }
 
 /* Node info panel (right side of the canvas) */
@@ -161,6 +241,78 @@ body,
   stroke: #ff5d5d;
   stroke-width: 2;
   stroke-dasharray: 6 4;
+}
+
+/* Lift the React Flow zoom controls so the "?" help button sits below them. */
+.canvas .react-flow__controls {
+  margin-bottom: 52px !important;
+}
+
+/* Shortcut help card: "?" button pinned bottom-left, below the zoom controls. */
+.shortcuts {
+  position: absolute;
+  left: 15px;
+  bottom: 12px;
+  z-index: 12;
+}
+.shortcuts-closed {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.shortcuts-closed:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.shortcuts-open {
+  width: 300px;
+  max-width: calc(100% - 24px);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 10px 12px 12px;
+}
+.shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.shortcuts-toggle {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+.shortcuts-toggle:hover {
+  color: var(--text);
+}
+.shortcuts-list {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.shortcuts-list li {
+  margin-bottom: 4px;
+}
+.shortcuts-list b {
+  color: var(--text);
 }
 
 /* Nodes */
