@@ -1,0 +1,34 @@
+<svg width="100%" viewBox="0 0 1280 380" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Input shows file details feature banner</title>
+<desc>A dark scene: an Input node displaying detected resolution, frame rate, duration, size and audio for a dropped file.</desc>
+<defs>
+<pattern id="idots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.3" fill="#26262c"/></pattern>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}</style>
+<clipPath id="iIn"><rect x="760" y="56" width="312" height="284" rx="10"/></clipPath>
+</defs>
+
+<rect x="0" y="0" width="1280" height="380" rx="16" fill="#1b1b1f"/>
+<rect x="0" y="0" width="1280" height="380" rx="16" fill="url(#idots)" opacity="0.55"/>
+
+<text x="72" y="94" fill="#5e9bff" font-size="16" font-weight="500" letter-spacing="1.2">Automatic probing</text>
+<text x="70" y="158" fill="#e6e6ea" font-size="44" font-weight="600">Inputs show the details</text>
+<text x="72" y="206" fill="#9a9aa6" font-size="20">Resolution, fps, duration, size and audio</text>
+<text x="72" y="234" fill="#9a9aa6" font-size="20">detected the moment you add a file.</text>
+
+<g clip-path="url(#iIn)"><rect x="760" y="56" width="312" height="284" fill="#26262c"/><rect x="760" y="56" width="312" height="30" fill="#2f2f37"/><rect x="760" y="56" width="312" height="4" fill="#4f8cff"/></g>
+<rect x="760" y="56" width="312" height="284" rx="10" fill="none" stroke="#3a3a44" stroke-width="1"/>
+<circle cx="778" cy="72" r="4" fill="#4f8cff"/><text x="790" y="76" fill="#e6e6ea" font-size="13" font-weight="600">Input</text>
+<rect x="982" y="62" width="78" height="20" rx="10" fill="#1c2a1c" stroke="#2f5f33" stroke-width="1"/>
+<text x="1021" y="76" fill="#6bd968" font-size="11" font-weight="500" text-anchor="middle">detected</text>
+
+<rect x="776" y="98" width="280" height="92" rx="4" fill="#101014" stroke="#3a3a44" stroke-width="1"/>
+<polygon points="908,132 908,156 928,144" fill="#6f9bff"/>
+
+<text x="776" y="220" fill="#9a9aa6" font-size="13">Resolution</text><text x="1056" y="220" fill="#e6e6ea" font-size="13" text-anchor="end">1920 × 1080</text>
+<text x="776" y="248" fill="#9a9aa6" font-size="13">Frame rate</text><text x="1056" y="248" fill="#e6e6ea" font-size="13" text-anchor="end">30 fps</text>
+<text x="776" y="276" fill="#9a9aa6" font-size="13">Duration</text><text x="1056" y="276" fill="#e6e6ea" font-size="13" text-anchor="end">00:12.40</text>
+<text x="776" y="304" fill="#9a9aa6" font-size="13">Size</text><text x="1056" y="304" fill="#e6e6ea" font-size="13" text-anchor="end">240 MB</text>
+<text x="776" y="332" fill="#9a9aa6" font-size="13">Audio</text><text x="1056" y="332" fill="#e6e6ea" font-size="13" text-anchor="end">AAC · stereo</text>
+
+<circle cx="1072" cy="198" r="6" fill="#4f8cff" stroke="#1b1b1f" stroke-width="2"/>
+</svg>

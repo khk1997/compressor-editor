@@ -1,0 +1,37 @@
+<svg width="100%" viewBox="0 0 1280 380" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Processing nodes feature banner</title>
+<desc>A dark scene introducing three processing nodes: Trim, Crop and Retime, each with a short description.</desc>
+<defs>
+<pattern id="rdots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.3" fill="#26262c"/></pattern>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}</style>
+<clipPath id="cT"><rect x="740" y="66" width="430" height="76" rx="10"/></clipPath>
+<clipPath id="cC"><rect x="740" y="158" width="430" height="76" rx="10"/></clipPath>
+<clipPath id="cR"><rect x="740" y="250" width="430" height="76" rx="10"/></clipPath>
+</defs>
+
+<rect x="0" y="0" width="1280" height="380" rx="16" fill="#1b1b1f"/>
+<rect x="0" y="0" width="1280" height="380" rx="16" fill="url(#rdots)" opacity="0.55"/>
+
+<text x="72" y="94" fill="#5e9bff" font-size="16" font-weight="500" letter-spacing="1.2">Composable pipeline</text>
+<text x="70" y="158" fill="#e6e6ea" font-size="46" font-weight="600">Trim, crop, retime</text>
+<text x="72" y="204" fill="#9a9aa6" font-size="20">Chain processing nodes in any order</text>
+<text x="72" y="232" fill="#9a9aa6" font-size="20">between input and output.</text>
+
+<g clip-path="url(#cT)"><rect x="740" y="66" width="430" height="76" fill="#26262c"/><rect x="740" y="66" width="430" height="4" fill="#ffb020"/></g>
+<rect x="740" y="66" width="430" height="76" rx="10" fill="none" stroke="#3a3a44" stroke-width="1"/>
+<circle cx="762" cy="92" r="4" fill="#ffb020"/><text x="776" y="97" fill="#e6e6ea" font-size="15" font-weight="600">Trim</text>
+<text x="776" y="120" fill="#9a9aa6" font-size="13">Set in and out points (frame-accurate)</text>
+<circle cx="740" cy="104" r="6" fill="#ffb020" stroke="#1b1b1f" stroke-width="2"/><circle cx="1170" cy="104" r="6" fill="#ffb020" stroke="#1b1b1f" stroke-width="2"/>
+
+<g clip-path="url(#cC)"><rect x="740" y="158" width="430" height="76" fill="#26262c"/><rect x="740" y="158" width="430" height="4" fill="#38c1c1"/></g>
+<rect x="740" y="158" width="430" height="76" rx="10" fill="none" stroke="#3a3a44" stroke-width="1"/>
+<circle cx="762" cy="184" r="4" fill="#38c1c1"/><text x="776" y="189" fill="#e6e6ea" font-size="15" font-weight="600">Crop</text>
+<text x="776" y="212" fill="#9a9aa6" font-size="13">Drag a region on the source preview</text>
+<circle cx="740" cy="196" r="6" fill="#38c1c1" stroke="#1b1b1f" stroke-width="2"/><circle cx="1170" cy="196" r="6" fill="#38c1c1" stroke="#1b1b1f" stroke-width="2"/>
+
+<g clip-path="url(#cR)"><rect x="740" y="250" width="430" height="76" fill="#26262c"/><rect x="740" y="250" width="430" height="4" fill="#c98bff"/></g>
+<rect x="740" y="250" width="430" height="76" rx="10" fill="none" stroke="#3a3a44" stroke-width="1"/>
+<circle cx="762" cy="276" r="4" fill="#c98bff"/><text x="776" y="281" fill="#e6e6ea" font-size="15" font-weight="600">Retime</text>
+<text x="776" y="304" fill="#9a9aa6" font-size="13">Speed, reverse, frame interpolation</text>
+<circle cx="740" cy="288" r="6" fill="#c98bff" stroke="#1b1b1f" stroke-width="2"/><circle cx="1170" cy="288" r="6" fill="#c98bff" stroke="#1b1b1f" stroke-width="2"/>
+</svg>

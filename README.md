@@ -5,13 +5,15 @@ sequences and video into WebP / MP4 (H.264·H.265) / MOV (ProRes) / WebM (VP9) /
 AV1 / PNG sequence, with a Blender-style node graph for chaining Trim, Crop and
 Retime stages.
 
-![Compress videos — shrink MP4, MOV, WebM and WebP](docs/banners/01-compress.svg)
+![Node-based editor — wire inputs, effects and outputs into a pipeline](docs/banners/01-node-based.svg)
 
-![Convert formats — one source out to many formats](docs/banners/02-convert.svg)
+![Compress videos — shrink MP4, MOV, WebM and WebP](docs/banners/02-compress.svg)
 
-![Export PNG sequence — lossless, alpha-preserving frames](docs/banners/03-png-sequence.svg)
+![Convert formats — one source out to many formats](docs/banners/03-convert.svg)
 
-![Knife tool — drag to cut links](docs/banners/04-knife.svg)
+![Inputs show the details — resolution, fps, duration, size and audio](docs/banners/04-input-specs.svg)
+
+![Trim, crop, retime — composable processing nodes](docs/banners/05-processing.svg)
 
 ## Features
 
