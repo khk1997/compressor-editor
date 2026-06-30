@@ -1,0 +1,58 @@
+<svg width="100%" viewBox="0 0 1280 380" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Knife tool feature banner</title>
+<desc>A dark node-editor scene: a highlighted scissors toolbar button and a red dashed stroke cutting the link between an Input and an Output node.</desc>
+<defs>
+<pattern id="kdots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.3" fill="#26262c"/></pattern>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}</style>
+<clipPath id="kA"><rect x="700" y="150" width="168" height="112" rx="10"/></clipPath>
+<clipPath id="kB"><rect x="1014" y="168" width="168" height="112" rx="10"/></clipPath>
+</defs>
+
+<rect x="0" y="0" width="1280" height="380" rx="16" fill="#1b1b1f"/>
+<rect x="0" y="0" width="1280" height="380" rx="16" fill="url(#kdots)" opacity="0.55"/>
+
+<text x="72" y="94" fill="#5e9bff" font-size="16" font-weight="500" letter-spacing="1.2">New in v0.1</text>
+<text x="70" y="156" fill="#e6e6ea" font-size="48" font-weight="600">Knife tool</text>
+<text x="72" y="204" fill="#9a9aa6" font-size="20">Toggle the scissors tool, then drag across</text>
+<text x="72" y="232" fill="#9a9aa6" font-size="20">any link to cut it — no modifier needed.</text>
+
+<g>
+<rect x="700" y="70" width="96" height="34" rx="8" fill="#ff5d5d"/>
+<g stroke="#ffffff" stroke-width="2" fill="none" stroke-linecap="round">
+<circle cx="716" cy="83" r="3.5"/><circle cx="716" cy="93" r="3.5"/>
+<line x1="719" y1="85" x2="733" y2="95"/><line x1="719" y1="91" x2="733" y2="81"/>
+</g>
+<text x="742" y="92" fill="#ffffff" font-size="14" font-weight="600">Cut</text>
+</g>
+
+<g clip-path="url(#kA)">
+<rect x="700" y="150" width="168" height="112" fill="#26262c"/>
+<rect x="700" y="150" width="168" height="30" fill="#2f2f37"/>
+<rect x="700" y="150" width="168" height="4" fill="#4f8cff"/>
+</g>
+<rect x="700" y="150" width="168" height="112" rx="10" fill="none" stroke="#3a3a44" stroke-width="1"/>
+<circle cx="716" cy="166" r="4" fill="#4f8cff"/>
+<text x="728" y="170" fill="#e6e6ea" font-size="13" font-weight="600">Input</text>
+<rect x="716" y="194" width="118" height="9" rx="3" fill="#34343c"/>
+<rect x="716" y="211" width="138" height="9" rx="3" fill="#34343c"/>
+<rect x="716" y="228" width="86" height="9" rx="3" fill="#34343c"/>
+<circle cx="868" cy="206" r="6" fill="#4f8cff" stroke="#1b1b1f" stroke-width="2"/>
+
+<g clip-path="url(#kB)">
+<rect x="1014" y="168" width="168" height="112" fill="#26262c"/>
+<rect x="1014" y="168" width="168" height="30" fill="#2f2f37"/>
+<rect x="1014" y="168" width="168" height="4" fill="#6bd968"/>
+</g>
+<rect x="1014" y="168" width="168" height="112" rx="10" fill="none" stroke="#3a3a44" stroke-width="1"/>
+<circle cx="1030" cy="184" r="4" fill="#6bd968"/>
+<text x="1042" y="188" fill="#e6e6ea" font-size="13" font-weight="600">Output</text>
+<rect x="1030" y="212" width="118" height="9" rx="3" fill="#34343c"/>
+<rect x="1030" y="229" width="138" height="9" rx="3" fill="#34343c"/>
+<rect x="1030" y="246" width="86" height="9" rx="3" fill="#34343c"/>
+<circle cx="1014" cy="224" r="6" fill="#6bd968" stroke="#1b1b1f" stroke-width="2"/>
+
+<path d="M868,206 C912,206 928,214 940,217" fill="none" stroke="#6f9bff" stroke-width="2.5"/>
+<path d="M950,220 C978,226 998,224 1014,224" fill="none" stroke="#6f9bff" stroke-width="2.5"/>
+
+<polyline points="916,176 945,217 974,258" fill="none" stroke="#ff5d5d" stroke-width="3" stroke-dasharray="7 5" stroke-linecap="round"/>
+</svg>

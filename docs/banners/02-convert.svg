@@ -1,0 +1,72 @@
+<svg width="100%" viewBox="0 0 1280 380" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Convert formats feature banner</title>
+<desc>A dark node-editor scene: one Input node fans out to three Output nodes labelled MP4, WebP and PNG sequence.</desc>
+<defs>
+<pattern id="vdots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.3" fill="#26262c"/></pattern>
+<style>text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}</style>
+<clipPath id="vIn"><rect x="700" y="182" width="150" height="96" rx="10"/></clipPath>
+<clipPath id="vO1"><rect x="1024" y="66" width="150" height="74" rx="10"/></clipPath>
+<clipPath id="vO2"><rect x="1024" y="178" width="150" height="74" rx="10"/></clipPath>
+<clipPath id="vO3"><rect x="1024" y="290" width="150" height="74" rx="10"/></clipPath>
+</defs>
+
+<rect x="0" y="0" width="1280" height="380" rx="16" fill="#1b1b1f"/>
+<rect x="0" y="0" width="1280" height="380" rx="16" fill="url(#vdots)" opacity="0.55"/>
+
+<text x="72" y="94" fill="#5e9bff" font-size="16" font-weight="500" letter-spacing="1.2">One source, many formats</text>
+<text x="70" y="158" fill="#e6e6ea" font-size="48" font-weight="600">Convert formats</text>
+<text x="72" y="206" fill="#9a9aa6" font-size="20">Send one input out to MP4, MOV, WebM,</text>
+<text x="72" y="234" fill="#9a9aa6" font-size="20">WebP or a PNG sequence — in one run.</text>
+
+<path d="M850,230 C930,230 952,103 1024,103" fill="none" stroke="#6f9bff" stroke-width="2.5"/>
+<path d="M850,230 C940,230 968,215 1024,215" fill="none" stroke="#6f9bff" stroke-width="2.5"/>
+<path d="M850,230 C930,230 952,327 1024,327" fill="none" stroke="#6f9bff" stroke-width="2.5"/>
+
+<g clip-path="url(#vIn)">
+<rect x="700" y="182" width="150" height="96" fill="#26262c"/>
+<rect x="700" y="182" width="150" height="28" fill="#2f2f37"/>
+<rect x="700" y="182" width="150" height="4" fill="#4f8cff"/>
+</g>
+<rect x="700" y="182" width="150" height="96" rx="10" fill="none" stroke="#3a3a44" stroke-width="1"/>
+<circle cx="714" cy="197" r="4" fill="#4f8cff"/>
+<text x="726" y="201" fill="#e6e6ea" font-size="13" font-weight="600">Input</text>
+<rect x="714" y="220" width="122" height="46" rx="4" fill="#101014" stroke="#3a3a44" stroke-width="1"/>
+<polygon points="762,235 762,251 777,243" fill="#6f9bff"/>
+<circle cx="850" cy="230" r="6" fill="#4f8cff" stroke="#1b1b1f" stroke-width="2"/>
+
+<g clip-path="url(#vO1)">
+<rect x="1024" y="66" width="150" height="74" fill="#26262c"/>
+<rect x="1024" y="66" width="150" height="28" fill="#2f2f37"/>
+<rect x="1024" y="66" width="150" height="4" fill="#6bd968"/>
+</g>
+<rect x="1024" y="66" width="150" height="74" rx="10" fill="none" stroke="#3a3a44" stroke-width="1"/>
+<circle cx="1040" cy="84" r="4" fill="#6bd968"/>
+<text x="1052" y="88" fill="#e6e6ea" font-size="13" font-weight="600">Output</text>
+<rect x="1040" y="104" width="116" height="24" rx="4" fill="#1b1b1f" stroke="#4f8cff" stroke-width="1"/>
+<text x="1098" y="120" fill="#4f8cff" font-size="13" font-weight="600" text-anchor="middle">MP4</text>
+<circle cx="1024" cy="103" r="6" fill="#6bd968" stroke="#1b1b1f" stroke-width="2"/>
+
+<g clip-path="url(#vO2)">
+<rect x="1024" y="178" width="150" height="74" fill="#26262c"/>
+<rect x="1024" y="178" width="150" height="28" fill="#2f2f37"/>
+<rect x="1024" y="178" width="150" height="4" fill="#6bd968"/>
+</g>
+<rect x="1024" y="178" width="150" height="74" rx="10" fill="none" stroke="#3a3a44" stroke-width="1"/>
+<circle cx="1040" cy="196" r="4" fill="#6bd968"/>
+<text x="1052" y="200" fill="#e6e6ea" font-size="13" font-weight="600">Output</text>
+<rect x="1040" y="216" width="116" height="24" rx="4" fill="#1b1b1f" stroke="#38c1c1" stroke-width="1"/>
+<text x="1098" y="232" fill="#38c1c1" font-size="13" font-weight="600" text-anchor="middle">WebP</text>
+<circle cx="1024" cy="215" r="6" fill="#6bd968" stroke="#1b1b1f" stroke-width="2"/>
+
+<g clip-path="url(#vO3)">
+<rect x="1024" y="290" width="150" height="74" fill="#26262c"/>
+<rect x="1024" y="290" width="150" height="28" fill="#2f2f37"/>
+<rect x="1024" y="290" width="150" height="4" fill="#6bd968"/>
+</g>
+<rect x="1024" y="290" width="150" height="74" rx="10" fill="none" stroke="#3a3a44" stroke-width="1"/>
+<circle cx="1040" cy="308" r="4" fill="#6bd968"/>
+<text x="1052" y="312" fill="#e6e6ea" font-size="13" font-weight="600">Output</text>
+<rect x="1040" y="328" width="116" height="24" rx="4" fill="#1b1b1f" stroke="#ffb020" stroke-width="1"/>
+<text x="1098" y="344" fill="#ffb020" font-size="13" font-weight="600" text-anchor="middle">PNG sequence</text>
+<circle cx="1024" cy="327" r="6" fill="#6bd968" stroke="#1b1b1f" stroke-width="2"/>
+</svg>

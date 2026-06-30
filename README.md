@@ -2,7 +2,16 @@
 
 A node-based media compressor (Electron + React + React Flow). Convert PNG
 sequences and video into WebP / MP4 (H.264·H.265) / MOV (ProRes) / WebM (VP9) /
-AV1, with a Blender-style node graph for chaining Trim, Crop and Retime stages.
+AV1 / PNG sequence, with a Blender-style node graph for chaining Trim, Crop and
+Retime stages.
+
+![Compress videos — shrink MP4, MOV, WebM and WebP](docs/banners/01-compress.svg)
+
+![Convert formats — one source out to many formats](docs/banners/02-convert.svg)
+
+![Export PNG sequence — lossless, alpha-preserving frames](docs/banners/03-png-sequence.svg)
+
+![Knife tool — drag to cut links](docs/banners/04-knife.svg)
 
 ## Features
 
@@ -10,12 +19,13 @@ AV1, with a Blender-style node graph for chaining Trim, Crop and Retime stages.
   resolution, duration, audio probed automatically).
 - **Outputs**: WebP (animated, alpha via `img2webp`), MP4 (H.264 / H.265,
   hardware VideoToolbox option), MOV (ProRes Proxy→4444 with alpha), WebM (VP9
-  with alpha), AV1.
+  with alpha), AV1, PNG sequence (lossless, alpha-preserving frames to a folder).
 - **Quality or target file size** (2-pass) per output.
 - **Processing nodes**: Trim (in/out), Crop, Retime (speed / reverse / frame
   interpolation), composable in any chain.
-- Blender-style graph: Ctrl/⌘-drag to cut links, drop a node onto a link to
-  splice it in, per-node delete, save/load graph as JSON.
+- Blender-style graph: a knife/scissors tool to cut links (toolbar toggle, or
+  Ctrl/⌘-drag), drop a node onto a link to splice it in, per-node delete,
+  save/load graph as JSON.
 - Batch queue with progress, cancel, and reveal-in-Finder.
 
 ## Develop
