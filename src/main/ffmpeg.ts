@@ -780,8 +780,9 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
     output.targetMB > 0 &&
     !!outDurationSec
 
-  // PNG sequence → WebP must go through img2webp for correct frame disposal.
-  const useSequenceWebp = input.type === 'sequence' && output.format === 'webp'
+  // All WebP output goes through img2webp for correct per-frame disposal
+  // (transparent animation). ffmpeg's libwebp stacks frames / drops alpha.
+  const useWebp = output.format === 'webp'
 
   // image2 muxer won't create directories — make the per-output frame folder first.
   if (output.format === 'pngseq') {
@@ -790,66 +791,94 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
 
   let promise: Promise<void>
 
-  if (useSequenceWebp) {
+  if (useWebp) {
     promise = (async () => {
-      const fps = input.fps ?? 30
       const active = retimeActive(retime)
-      const speed = active ? retime.speed : 100
-      const interp = active && retime.interpolation !== 'sampling'
-      // img2webp can only set per-frame duration + order, so anything that
-      // rewrites pixels (interpolation, crop) or selects frames by time (trim)
-      // must be rendered through ffmpeg first.
-      const needsRender = interp || cropActive(crop) || trimActive(trim)
       let tmpDir: string | null = null
       try {
         let frames: string[]
         let durationMs: number
 
-        if (needsRender) {
-          // Render the trimmed/cropped/retimed (and scaled) frames with ffmpeg,
-          // then let img2webp pack them.
-          tmpDir = mkdtempSync(path.join(tmpdir(), 'seqretime-'))
+        if (input.type === 'sequence') {
+          const fps = input.fps ?? 30
+          const speed = active ? retime.speed : 100
+          const interp = active && retime.interpolation !== 'sampling'
+          // img2webp can only set per-frame duration + order, so anything that
+          // rewrites pixels (interpolation, crop) or selects frames by time (trim)
+          // must be rendered through ffmpeg first.
+          const needsRender = interp || cropActive(crop) || trimActive(trim)
+          if (needsRender) {
+            // Render the trimmed/cropped/retimed (and scaled) frames with ffmpeg,
+            // then let img2webp pack them.
+            tmpDir = mkdtempSync(path.join(tmpdir(), 'seqretime-'))
+            const vf = buildFilters(input, output, retime, trim, crop)
+            const renderArgs = [
+              '-y',
+              ...buildInputArgs(input),
+              '-vf',
+              vf.join(','),
+              '-start_number',
+              '0',
+              path.join(tmpDir, 'f_%06d.png')
+            ]
+            await runFfmpeg(renderArgs, totalUs, 0, 0.5, cb, setChild)
+            frames = listSequencePngs(tmpDir)
+            durationMs = Math.max(Math.round(1000 / fps), 1) // timing baked into frames
+          } else {
+            if (output.width && output.width > 0) {
+              // img2webp can't resize, so pre-scale every frame with ffmpeg first.
+              tmpDir = mkdtempSync(path.join(tmpdir(), 'seqscale-'))
+              const scaleArgs = [
+                '-y',
+                '-framerate',
+                String(fps),
+                '-pattern_type',
+                'glob',
+                '-i',
+                path.join(input.path, '*.png'),
+                '-vf',
+                `scale=${output.width}:-2:flags=lanczos`,
+                '-start_number',
+                '0',
+                path.join(tmpDir, 'f_%06d.png')
+              ]
+              await runFfmpeg(scaleArgs, totalUs, 0, 0.4, cb, setChild)
+              frames = listSequencePngs(tmpDir)
+            } else {
+              frames = listSequencePngs(input.path)
+            }
+            // Frame sampling: speed/reverse handled by per-frame duration + order.
+            if (active && retime.reverse) frames = [...frames].reverse()
+            durationMs = Math.max(Math.round((1000 / fps) * (100 / speed)), 1)
+          }
+        } else {
+          // Video → WebP: decode the fully-processed clip to a temp PNG sequence at
+          // a fixed rate, then let img2webp pack it with correct per-frame disposal
+          // (ffmpeg's libwebp can't, so transparent frames would otherwise stack /
+          // go black). -r pins the rate so retime is captured as constant-rate frames.
+          const fps =
+            input.fps && input.fps > 0
+              ? input.fps
+              : input.sourceFps && input.sourceFps > 0
+                ? input.sourceFps
+                : 30
+          tmpDir = mkdtempSync(path.join(tmpdir(), 'vidwebp-'))
           const vf = buildFilters(input, output, retime, trim, crop)
           const renderArgs = [
             '-y',
             ...buildInputArgs(input),
-            '-vf',
-            vf.join(','),
+            ...(vf.length ? ['-vf', vf.join(',')] : []),
+            '-r',
+            String(fps),
             '-start_number',
             '0',
             path.join(tmpDir, 'f_%06d.png')
           ]
           await runFfmpeg(renderArgs, totalUs, 0, 0.5, cb, setChild)
           frames = listSequencePngs(tmpDir)
-          durationMs = Math.max(Math.round(1000 / fps), 1) // timing baked into frames
-        } else {
-          if (output.width && output.width > 0) {
-            // img2webp can't resize, so pre-scale every frame with ffmpeg first.
-            tmpDir = mkdtempSync(path.join(tmpdir(), 'seqscale-'))
-            const scaleArgs = [
-              '-y',
-              '-framerate',
-              String(fps),
-              '-pattern_type',
-              'glob',
-              '-i',
-              path.join(input.path, '*.png'),
-              '-vf',
-              `scale=${output.width}:-2:flags=lanczos`,
-              '-start_number',
-              '0',
-              path.join(tmpDir, 'f_%06d.png')
-            ]
-            await runFfmpeg(scaleArgs, totalUs, 0, 0.4, cb, setChild)
-            frames = listSequencePngs(tmpDir)
-          } else {
-            frames = listSequencePngs(input.path)
-          }
-          // Frame sampling: speed/reverse handled by per-frame duration + order.
-          if (active && retime.reverse) frames = [...frames].reverse()
-          durationMs = Math.max(Math.round((1000 / fps) * (100 / speed)), 1)
+          durationMs = Math.max(Math.round(1000 / fps), 1)
         }
-        if (!frames.length) throw new Error('No PNG frames found in the sequence folder')
+        if (!frames.length) throw new Error('No frames to assemble for the WebP')
 
         const args = [
           '-loop',
