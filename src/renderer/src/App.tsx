@@ -5,6 +5,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  SelectionMode,
   addEdge,
   useNodesState,
   useEdgesState,
@@ -20,9 +21,11 @@ import { RetimeNode } from './nodes/RetimeNode'
 import { TrimNode } from './nodes/TrimNode'
 import { CropNode } from './nodes/CropNode'
 import { LocationNode } from './nodes/LocationNode'
+import { GroupNode } from './nodes/GroupNode'
 import { InfoPanel } from './InfoPanel'
 import { Knife } from './components/Knife'
 import { Toolbar } from './components/Toolbar'
+import { AddNodeMenu } from './components/AddNodeMenu'
 import { useJobRunner } from './hooks/useJobRunner'
 import { useUpstreamSync } from './hooks/useUpstreamSync'
 import { useHistory } from './hooks/useHistory'
@@ -54,6 +57,14 @@ const stem = (p: string): string => basename(p).replace(/\.[^.]+$/, '')
 let idSeq = 1
 const nextId = (): string => `n${idSeq++}`
 
+/** Colour a log line by severity: errors red, warnings amber, else neutral. */
+const logClass = (line: string): string =>
+  /\bERROR\b|❌/.test(line)
+    ? 'log-line log-line-err'
+    : line.includes('⚠')
+      ? 'log-line log-line-warn'
+      : 'log-line'
+
 /**
  * Migrate an output node saved before MP4 codecs were merged into one container.
  * Old graphs used separate `h265`/`av1` formats and a `movCodec` field; map both
@@ -80,15 +91,63 @@ function migrateOutputNode(n: Node): Node {
 const PROCESSING = ['retime-node', 'trim-node', 'crop-node']
 const AUTOSAVE_KEY = 'compressor-autosave'
 
+/** Fresh default `data` for a newly created node of the given type. */
+function defaultNodeData(type: string): Record<string, unknown> {
+  switch (type) {
+    case 'input-node':
+      return {
+        // Video is the common case for a compressor; drag-drop still auto-detects.
+        sourceType: 'video',
+        path: null,
+        fps: null,
+        detectedFps: null,
+        detectedWidth: null,
+        detectedHeight: null,
+        detectedSize: null,
+        detectedDuration: null,
+        detectedHasAudio: false,
+        detectedFrames: null
+      } satisfies InputNodeData
+    case 'retime-node':
+      return { speed: 100, reverse: false, interpolation: 'sampling' } satisfies RetimeNodeData
+    case 'trim-node':
+      return { startSec: 0, endSec: null, dropFirst: 0, dropLast: 0 } satisfies TrimNodeData
+    case 'crop-node':
+      return { x: 0, y: 0, width: 0, height: 0 } satisfies CropNodeData
+    case 'output-node':
+      return {
+        format: 'mp4',
+        codec: 'h264',
+        quality: 75,
+        sizeMode: 'quality',
+        targetMB: null,
+        hardware: false,
+        proresProfile: 3,
+        hevcAlpha: false,
+        width: null,
+        height: null,
+        linkDims: true,
+        outputPath: null,
+        locationDir: null,
+        status: 'idle',
+        percent: 0
+      } satisfies OutputNodeData
+    case 'location-node':
+      return { dir: null } satisfies LocationNodeData
+    default:
+      return {}
+  }
+}
+
 const initialNodes: Node[] = [
   {
     id: 'in1',
     type: 'input-node',
     position: { x: 80, y: 200 },
     data: {
-      sourceType: 'sequence',
+      sourceType: 'video',
       path: null,
-      fps: 30,
+      fps: null,
       detectedFps: null,
       detectedWidth: null,
       detectedHeight: null,
@@ -128,8 +187,12 @@ function Flow(): JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [cutMode, setCutMode] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  // Blender-style "Add" menu: null when closed, else the cursor's client coords.
+  const [addMenu, setAddMenu] = useState<{ clientX: number; clientY: number } | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
+  // Last pointer position over the canvas — where Shift+A spawns a node.
+  const lastPointer = useRef({ x: 0, y: 0 })
 
   // Keep live refs so useHistory can snapshot without stale closures.
   const nodesRef = useRef(nodes)
@@ -144,11 +207,29 @@ function Flow(): JSX.Element {
 
   useUpstreamSync(nodes, edges, updateNodeData)
 
+  // ── Live pre-run validation: surface each Output's blocker on the node itself ──
+  useEffect(() => {
+    const { problems } = buildJobs(nodes, edges)
+    const byOut = new Map<string, string>()
+    for (const pr of problems) {
+      const i = pr.indexOf(': ')
+      if (i > 0 && !byOut.has(pr.slice(0, i))) byOut.set(pr.slice(0, i), pr.slice(i + 2))
+    }
+    for (const n of nodes) {
+      if (n.type !== 'output-node') continue
+      const want = byOut.get(n.id) ?? null
+      if ((n.data as OutputNodeData).problem !== want) updateNodeData(n.id, { problem: want })
+    }
+  }, [nodes, edges, updateNodeData])
+
   // ── Auto-save / restore ───────────────────────────────────────────────────
   const restoredRef = useRef(false)
   useEffect(() => {
     if (restoredRef.current) return
     restoredRef.current = true
+    // The dev launcher (dev.command) sets VITE_FRESH_START so we open on a blank
+    // canvas; the shipped app always restores the last session.
+    if (__FRESH_START__) return
     try {
       const saved = localStorage.getItem(AUTOSAVE_KEY)
       if (!saved) return
@@ -199,6 +280,20 @@ function Flow(): JSX.Element {
     return () => window.removeEventListener('keydown', handler)
   }, [undo, redo])
 
+  // ── Blender-style Add menu (Shift+A) ──────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      if ((e.key !== 'a' && e.key !== 'A') || !e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)
+        return
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+      e.preventDefault()
+      setAddMenu({ clientX: lastPointer.current.x, clientY: lastPointer.current.y })
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   // ── Log auto-scroll ───────────────────────────────────────────────────────
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
@@ -211,7 +306,8 @@ function Flow(): JSX.Element {
       'retime-node': RetimeNode,
       'trim-node': TrimNode,
       'crop-node': CropNode,
-      'location-node': LocationNode
+      'location-node': LocationNode,
+      group: GroupNode
     }),
     []
   )
@@ -279,116 +375,132 @@ function Flow(): JSX.Element {
   )
 
   // ── Node creation ─────────────────────────────────────────────────────────
-  const addInput = (): void => {
-    pushHistory()
-    setNodes((n) => [
-      ...n,
-      {
-        id: nextId(),
-        type: 'input-node',
-        position: screenToFlowPosition({ x: 200, y: 200 }),
-        data: {
-          sourceType: 'sequence',
-          path: null,
-          fps: 30,
-          detectedFps: null,
-          detectedWidth: null,
-          detectedHeight: null,
-          detectedSize: null,
-          detectedDuration: null,
-          detectedHasAudio: false,
-          detectedFrames: null
-        } satisfies InputNodeData
-      }
-    ])
-  }
+  // Spawn a node of the given type at a flow-coordinate position.
+  const spawnNode = useCallback(
+    (type: string, position: { x: number; y: number }): void => {
+      pushHistory()
+      setNodes((n) => [
+        ...n,
+        { id: nextId(), type, position, data: defaultNodeData(type) as Node['data'] }
+      ])
+    },
+    [setNodes, pushHistory]
+  )
 
-  const addRetime = (): void => {
-    pushHistory()
-    setNodes((n) => [
-      ...n,
-      {
-        id: nextId(),
-        type: 'retime-node',
-        position: screenToFlowPosition({ x: 400, y: 220 }),
-        data: { speed: 100, reverse: false, interpolation: 'sampling' } satisfies RetimeNodeData
-      }
-    ])
-  }
+  // Toolbar buttons drop a node at a fixed screen anchor (converted to flow coords).
+  const addInput = (): void => spawnNode('input-node', screenToFlowPosition({ x: 200, y: 200 }))
+  const addRetime = (): void => spawnNode('retime-node', screenToFlowPosition({ x: 400, y: 220 }))
+  const addTrim = (): void => spawnNode('trim-node', screenToFlowPosition({ x: 400, y: 320 }))
+  const addCrop = (): void => spawnNode('crop-node', screenToFlowPosition({ x: 400, y: 420 }))
+  const addOutput = (): void => spawnNode('output-node', screenToFlowPosition({ x: 600, y: 220 }))
+  const addLocation = (): void =>
+    spawnNode('location-node', screenToFlowPosition({ x: 600, y: 420 }))
 
-  const addTrim = (): void => {
+  // ── Grouping (Blender-style lightweight frame) ────────────────────────────
+  const GROUP_PAD = 28
+  const GROUP_HEAD = 30
+  // Wrap the currently-selected free nodes in a group frame.
+  const makeGroup = useCallback((): void => {
+    // Only free, non-group nodes can be grouped (no nesting).
+    const members = getNodes().filter((n) => n.selected && n.type !== 'group' && !n.parentId)
+    if (members.length < 1) return
+    const minX = Math.min(...members.map((n) => n.position.x))
+    const minY = Math.min(...members.map((n) => n.position.y))
+    const maxX = Math.max(...members.map((n) => n.position.x + (n.measured?.width ?? 220)))
+    const maxY = Math.max(...members.map((n) => n.position.y + (n.measured?.height ?? 120)))
+    const gx = minX - GROUP_PAD
+    const gy = minY - GROUP_PAD - GROUP_HEAD
+    const groupId = nextId()
+    const groupNode: Node = {
+      id: groupId,
+      type: 'group',
+      position: { x: gx, y: gy },
+      data: { label: 'Group' },
+      // v12 sizes group/parent nodes via style, not top-level width/height.
+      style: {
+        width: maxX - minX + GROUP_PAD * 2,
+        height: maxY - minY + GROUP_PAD * 2 + GROUP_HEAD
+      },
+      deletable: false // dissolve via Ungroup so members are never orphaned
+    }
+    const ids = new Set(members.map((n) => n.id))
     pushHistory()
-    setNodes((n) => [
-      ...n,
-      {
-        id: nextId(),
-        type: 'trim-node',
-        position: screenToFlowPosition({ x: 400, y: 320 }),
-        data: { startSec: 0, endSec: null, dropFirst: 0, dropLast: 0 } satisfies TrimNodeData
-      }
-    ])
-  }
+    setNodes((ns) => {
+      const rest = ns.filter((n) => !ids.has(n.id))
+      const children = members.map((n) => ({
+        ...n,
+        parentId: groupId,
+        position: { x: n.position.x - gx, y: n.position.y - gy },
+        selected: false
+      }))
+      // A parent node must precede its children in the array.
+      return [...rest, groupNode, ...children]
+    })
+  }, [getNodes, setNodes, pushHistory])
 
-  const addCrop = (): void => {
-    pushHistory()
-    setNodes((n) => [
-      ...n,
-      {
-        id: nextId(),
-        type: 'crop-node',
-        position: screenToFlowPosition({ x: 400, y: 420 }),
-        data: { x: 0, y: 0, width: 0, height: 0 } satisfies CropNodeData
-      }
-    ])
-  }
+  // Dissolve a group: free its members (back to absolute coords) and drop the frame.
+  const ungroup = useCallback(
+    (groupId: string): void => {
+      const group = getNodes().find((n) => n.id === groupId)
+      if (!group) return
+      pushHistory()
+      setNodes((ns) =>
+        ns
+          .filter((n) => n.id !== groupId)
+          .map((n) =>
+            n.parentId === groupId
+              ? {
+                  ...n,
+                  parentId: undefined,
+                  position: {
+                    x: n.position.x + group.position.x,
+                    y: n.position.y + group.position.y
+                  }
+                }
+              : n
+          )
+      )
+    },
+    [getNodes, setNodes, pushHistory]
+  )
 
-  const addOutput = (): void => {
-    pushHistory()
-    setNodes((n) => [
-      ...n,
-      {
-        id: nextId(),
-        type: 'output-node',
-        position: screenToFlowPosition({ x: 600, y: 220 }),
-        data: {
-          format: 'mp4',
-          codec: 'h264',
-          quality: 75,
-          sizeMode: 'quality',
-          targetMB: null,
-          hardware: false,
-          proresProfile: 3,
-          hevcAlpha: false,
-          width: null,
-          outputPath: null,
-          locationDir: null,
-          status: 'idle',
-          percent: 0
-        } satisfies OutputNodeData
-      }
-    ])
-  }
+  // Ungroup based on the current selection (a selected group, or a selected member).
+  const ungroupSelected = useCallback((): void => {
+    const sel = getNodes().filter((n) => n.selected)
+    const gid = sel.find((n) => n.type === 'group')?.id ?? sel.find((n) => n.parentId)?.parentId
+    if (gid) ungroup(gid)
+  }, [getNodes, ungroup])
 
-  const addLocation = (): void => {
-    pushHistory()
-    setNodes((n) => [
-      ...n,
-      {
-        id: nextId(),
-        type: 'location-node',
-        position: screenToFlowPosition({ x: 600, y: 420 }),
-        data: { dir: null } satisfies LocationNodeData
+  // ── Group (Shift+P) / Ungroup (Alt+P) ─────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      // Use e.code (physical key) so Alt on macOS doesn't remap the character.
+      if (e.code !== 'KeyP' || e.metaKey || e.ctrlKey) return
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return
+      if (e.altKey) {
+        e.preventDefault()
+        ungroupSelected()
+      } else if (e.shiftKey) {
+        e.preventDefault()
+        makeGroup()
       }
-    ])
-  }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [makeGroup, ungroupSelected])
 
   // One-click wire the selected node to every Output on the canvas, skipping
   // links that already exist. A Location node feeds each Output's "save as"
   // (location handle); any other node feeds each Output's normal input.
+  // If the source lives in a group, only Outputs in that same group are wired.
   const connectSelectedToOutputs = (): void => {
     const src = nodes.find((n) => n.id === selectedId)
     if (!src || src.type === 'output-node') return
-    const outputs = nodes.filter((n) => n.type === 'output-node')
+    const groupId = src.parentId
+    const outputs = nodes.filter(
+      (n) => n.type === 'output-node' && (groupId ? n.parentId === groupId : true)
+    )
 
     if (src.type === 'location-node') {
       // An Output's location handle holds one connection — skip Outputs that
@@ -457,7 +569,9 @@ function Flow(): JSX.Element {
       }
     }
     const baseIds = new Set(jobs.map((j) => (j.id.includes('::') ? j.id.split('::')[0] : j.id)))
-    baseIds.forEach((bid) => updateNodeData(bid, { status: 'idle', percent: 0, message: undefined }))
+    baseIds.forEach((bid) =>
+      updateNodeData(bid, { status: 'idle', percent: 0, message: undefined, outSize: undefined })
+    )
     setRunning(true)
     setLogs((l) => [...l, `▶ Running ${jobs.length} job(s)…`])
     const r = await window.api.runJobs(jobs)
@@ -496,6 +610,35 @@ function Flow(): JSX.Element {
       setLogs((l) => [...l, '⚠ Could not parse that graph file.'])
     }
   }
+
+  // ── Run / Stop / Save / Open shortcuts ────────────────────────────────────
+  // Keep the latest handlers in a ref so one stable listener always calls current
+  // closures (run/stop/etc. are recreated every render).
+  const actions = useRef({ run, stop, saveGraph, loadGraph, running })
+  actions.current = { run, stop, saveGraph, loadGraph, running }
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      const mod = e.metaKey || e.ctrlKey
+      const el = e.target as HTMLElement
+      const typing =
+        el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
+      if (mod && e.key === 'Enter') {
+        e.preventDefault()
+        if (!actions.current.running) actions.current.run()
+      } else if (mod && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        actions.current.saveGraph()
+      } else if (mod && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault()
+        actions.current.loadGraph()
+      } else if (e.key === 'Escape' && !typing && actions.current.running) {
+        e.preventDefault()
+        actions.current.stop()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   // ── Drag-drop files onto canvas ───────────────────────────────────────────
   const onDragOverCanvas = useCallback((e: React.DragEvent): void => {
@@ -578,6 +721,9 @@ function Flow(): JSX.Element {
 
   // ── Render ────────────────────────────────────────────────────────────────
   const selectedNode = nodes.find((n) => n.id === selectedId)
+  const selectedNodes = nodes.filter((n) => n.selected)
+  const canGroup = selectedNodes.some((n) => n.type !== 'group' && !n.parentId)
+  const canUngroup = selectedNodes.some((n) => n.type === 'group' || !!n.parentId)
   const canConnectToOutputs = !!selectedNode && selectedNode.type !== 'output-node'
   const isLocationSelected = selectedNode?.type === 'location-node'
   const connectLabel = isLocationSelected ? '⤳ 連到所有 Save as' : '⤳ 連到所有 Output'
@@ -612,6 +758,9 @@ function Flow(): JSX.Element {
         ref={canvasRef}
         onDrop={onDropFiles}
         onDragOver={onDragOverCanvas}
+        onPointerMove={(e) => {
+          lastPointer.current = { x: e.clientX, y: e.clientY }
+        }}
       >
         <ReactFlow
           nodes={nodes}
@@ -622,8 +771,19 @@ function Flow(): JSX.Element {
           onNodeDragStop={onNodeDragStop}
           onNodeClick={(_e, n) => setSelectedId(n.id)}
           onPaneClick={() => setSelectedId(null)}
+          onPaneContextMenu={(e) => {
+            e.preventDefault()
+            setAddMenu({ clientX: e.clientX, clientY: e.clientY })
+          }}
+          onNodeContextMenu={(e) => {
+            e.preventDefault()
+            setAddMenu({ clientX: e.clientX, clientY: e.clientY })
+          }}
           nodeTypes={nodeTypes}
           deleteKeyCode={['Delete', 'Backspace', 'x', 'X']}
+          panOnDrag={[1]}
+          selectionOnDrag={!cutMode}
+          selectionMode={SelectionMode.Partial}
           fitView
           colorMode="dark"
           defaultEdgeOptions={{ animated: true }}
@@ -634,6 +794,27 @@ function Flow(): JSX.Element {
           <Controls />
         </ReactFlow>
         <Knife wrapperRef={canvasRef} active={cutMode} onBeforeCut={pushHistory} />
+        {addMenu && (
+          <AddNodeMenu
+            x={addMenu.clientX - (canvasRef.current?.getBoundingClientRect().left ?? 0)}
+            y={addMenu.clientY - (canvasRef.current?.getBoundingClientRect().top ?? 0)}
+            canGroup={canGroup}
+            canUngroup={canUngroup}
+            onGroup={() => {
+              makeGroup()
+              setAddMenu(null)
+            }}
+            onUngroup={() => {
+              ungroupSelected()
+              setAddMenu(null)
+            }}
+            onPick={(type) => {
+              spawnNode(type, screenToFlowPosition({ x: addMenu.clientX, y: addMenu.clientY }))
+              setAddMenu(null)
+            }}
+            onClose={() => setAddMenu(null)}
+          />
+        )}
         <InfoPanel node={selectedNode} />
 
         {helpOpen ? (
@@ -646,6 +827,19 @@ function Flow(): JSX.Element {
             </div>
             <ul className="shortcuts-list">
               <li>
+                <b>新增節點</b>:按 Shift+A 或在畫布上按滑鼠右鍵,於游標處選擇要加入的節點
+              </li>
+              <li>
+                <b>框選</b>:左鍵拖曳框選節點
+              </li>
+              <li>
+                <b>平移畫布</b>:按住滑鼠中鍵(滾輪)拖曳;滾輪滾動縮放
+              </li>
+              <li>
+                <b>群組 / 解散</b>:框選節點後按 Shift+P 群組、Alt+P 解散(亦可右鍵選單);群組內的「連到所有
+                Output / Location」只會作用在同群組內
+              </li>
+              <li>
                 <b>切斷連線</b>:按住 Ctrl/⌘ 拖曳劃過連線,或開啟工具列「✂ 剪刀」後直接拖曳
               </li>
               <li>
@@ -653,6 +847,9 @@ function Flow(): JSX.Element {
               </li>
               <li>
                 <b>復原 / 重做</b>:⌘Z / ⇧⌘Z
+              </li>
+              <li>
+                <b>執行 / 停止</b>:⌘↵ 執行、Esc 停止;<b>存檔 / 開啟</b>:⌘S / ⌘O
               </li>
               <li>
                 <b>插入處理節點</b>:把 Retime/Trim/Crop 拖到一條連線上即自動串接
@@ -681,7 +878,7 @@ function Flow(): JSX.Element {
           <div className="log-empty">Logs will appear here.</div>
         ) : (
           logs.map((line, i) => (
-            <div key={i} className="log-line">
+            <div key={i} className={logClass(line)}>
               {line}
             </div>
           ))

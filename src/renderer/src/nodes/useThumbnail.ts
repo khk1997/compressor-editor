@@ -4,6 +4,12 @@ export interface ThumbReq {
   kind: 'video' | 'sequence'
   path: string
   timeSec?: number
+  /** Sequence only: 0-based index of the PNG to preview (default 0). */
+  frame?: number
+  /** Optional crop rect (source px), applied before downscaling. */
+  crop?: { x: number; y: number; width: number; height: number }
+  /** Cache-buster: change it (e.g. to the output size) to re-fetch after a file is rewritten. */
+  bust?: string | number
   maxWidth?: number
 }
 
@@ -17,7 +23,10 @@ export interface ThumbState {
 // Module-level cache so re-selecting a node or re-rendering doesn't re-decode.
 // Stores the resolved url, or null when extraction failed (so we don't retry forever).
 const cache = new Map<string, string | null>()
-const keyOf = (r: ThumbReq): string => `${r.kind}|${r.path}|${r.timeSec ?? 0}|${r.maxWidth ?? 0}`
+const keyOf = (r: ThumbReq): string => {
+  const c = r.crop ? `${r.crop.x},${r.crop.y},${r.crop.width},${r.crop.height}` : ''
+  return `${r.kind}|${r.path}|${r.timeSec ?? 0}|${r.frame ?? 0}|${c}|${r.bust ?? ''}|${r.maxWidth ?? 0}`
+}
 
 /**
  * Fetch a preview frame (base64 PNG data URL) for a source, cached by request.

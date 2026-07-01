@@ -88,6 +88,131 @@ body,
   background: var(--border);
   margin: 4px 2px;
 }
+
+/* ── Blender-style Add menu (Shift+A / right-click) ───────────────────────── */
+.addmenu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.addmenu {
+  position: absolute;
+  z-index: 41;
+  width: 220px;
+  max-height: 70%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.addmenu-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 2px 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.addmenu-search {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  outline: none;
+}
+.addmenu-search:focus {
+  border-color: var(--accent);
+}
+.addmenu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+.addmenu-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+.addmenu-item-active,
+.addmenu-item:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.addmenu-item-label {
+  font-weight: 600;
+}
+.addmenu-item-hint {
+  font-size: 10px;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+.addmenu-empty {
+  padding: 8px;
+  font-size: 12px;
+  opacity: 0.6;
+  text-align: center;
+}
+.addmenu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 2px;
+}
+
+/* ── Group frame (Blender-style lightweight container) ────────────────────── */
+.react-flow__node-group {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+.node-group {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1.5px dashed var(--accent);
+  border-radius: 10px;
+  background: rgba(79, 140, 255, 0.06);
+}
+.react-flow__node-group.selected .node-group {
+  border-style: solid;
+  background: rgba(79, 140, 255, 0.12);
+}
+.node-group-title {
+  display: block;
+  margin: 6px 8px;
+  width: calc(100% - 16px);
+  max-width: 220px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 6px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+}
+.node-group-title:hover,
+.node-group-title:focus {
+  background: var(--panel);
+  border-color: var(--border);
+}
 /* Off-screen measuring row — never visible, just used to read natural widths.
    Clipped so its overflow can't add a page-level horizontal scrollbar; child
    getBoundingClientRect still reports each button's true (unclipped) width. */
@@ -448,6 +573,59 @@ body,
   stroke-width: 3px;
 }
 
+/* Box-select keeps each node's own selected highlight but no wrapping frame:
+   hide the persistent multi-selection rectangle (it stays interactive so the
+   whole selection can still be dragged as a unit). */
+.react-flow__nodesselection-rect {
+  border: none !important;
+  background: transparent !important;
+}
+
+/* Output size editor: W × H with an aspect-lock chain (Photoshop-style). */
+.dim-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dim-input {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+.dim-input::-webkit-outer-spin-button,
+.dim-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.dim-x {
+  color: var(--muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.dim-link {
+  flex-shrink: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.55;
+}
+.dim-link:hover {
+  border-color: var(--accent);
+}
+.dim-link-on {
+  opacity: 1;
+  border-color: var(--accent);
+}
+.dim-hint {
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 2px;
+}
+
 /* Per-node delete button */
 .node-del {
   margin-left: auto;
@@ -561,6 +739,36 @@ body,
 }
 
 /* Crop visual editor: image + draggable selection overlay. */
+/* Single-PNG frame preview in the Output node. Checkerboard shows transparency. */
+.png-frame-preview {
+  border-radius: 6px;
+  overflow: hidden;
+  outline: 1px solid var(--border);
+  outline-offset: -1px;
+  align-self: stretch;
+  background-color: #1a1a1a;
+  background-image: linear-gradient(45deg, #333 25%, transparent 25%),
+    linear-gradient(-45deg, #333 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #333 75%),
+    linear-gradient(-45deg, transparent 75%, #333 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.png-frame-img {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: contain;
+}
+.png-frame-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 90px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .crop-preview {
   position: relative;
   border-radius: 6px;
@@ -652,6 +860,10 @@ body,
   max-height: 64px;
   overflow: auto;
 }
+.hint-ok {
+  color: var(--accent-2);
+  font-weight: 600;
+}
 
 /* Selected node highlight (outline wraps outside without shifting layout) */
 .react-flow__node.selected .node {
@@ -688,6 +900,12 @@ body,
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.45;
+}
+.log-line-warn {
+  color: var(--warn);
+}
+.log-line-err {
+  color: var(--err);
 }
 
 /* React Flow handles */

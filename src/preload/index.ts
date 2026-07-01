@@ -13,6 +13,10 @@ export interface ThumbnailRequest {
   kind: 'video' | 'sequence'
   path: string
   timeSec?: number
+  /** Sequence only: 0-based index of the PNG to preview (default 0). */
+  frame?: number
+  /** Optional crop rect (source px), applied before downscaling. */
+  crop?: { x: number; y: number; width: number; height: number }
   maxWidth?: number
 }
 
@@ -35,6 +39,8 @@ export interface JobStatus {
   status: 'running' | 'done' | 'error'
   percent: number
   message?: string
+  /** Output file size in bytes, sent with the final 'done' status. */
+  sizeBytes?: number | null
 }
 
 export interface JobLog {
@@ -54,6 +60,8 @@ const api = {
     ipcRenderer.invoke('media:listVideos', folder),
   thumbnail: (req: ThumbnailRequest): Promise<string | null> =>
     ipcRenderer.invoke('media:thumbnail', req),
+  /** Read a small file (e.g. a WebP result) as a data URL for direct <img> display. */
+  readDataUrl: (p: string): Promise<string | null> => ipcRenderer.invoke('media:dataUrl', p),
   inspectPath: (p: string): Promise<InspectResult> => ipcRenderer.invoke('media:inspectPath', p),
   /** Resolve a dropped File to its absolute filesystem path (sandbox-safe). */
   pathForFile: (file: File): string => webUtils.getPathForFile(file),

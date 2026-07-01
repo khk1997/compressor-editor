@@ -70,6 +70,14 @@ export const FORMAT_CODECS: Record<OutputFormat, VideoCodec[]> = {
 export type JobState = 'idle' | 'running' | 'done' | 'error'
 export type SizeMode = 'quality' | 'target'
 export type Interpolation = 'sampling' | 'blend' | 'optical'
+/** How the animation loops. 'boomerang' appends the reversed middle (webp / pngseq only). */
+export type LoopMode = 'normal' | 'boomerang'
+/** PNG output shape: a numbered frame sequence, or a single chosen frame. */
+export type PngMode = 'sequence' | 'single'
+/** Boomerang (back-and-forth) can be baked into every output format. */
+export function supportsBoomerang(_format: OutputFormat): boolean {
+  return true
+}
 
 /** Target-file-size (2-pass) is only meaningful for H.264/H.265 in an MP4. */
 export function supportsTarget(format: OutputFormat, codec: VideoCodec): boolean {
@@ -143,8 +151,28 @@ export interface OutputNodeData {
   /** MOV + H.265 only: emit Apple "HEVC with Alpha" (forces VideoToolbox). */
   hevcAlpha: boolean
   width: number | null
+  /** Target height in px. null = auto (derive from width / keep aspect). */
+  height?: number | null
+  /** When true, width & height stay aspect-locked (Photoshop-style chain). */
+  linkDims?: boolean
+  /** Source dimensions from the connected Input, synced in for the "original" hint. */
+  srcWidth?: number | null
+  srcHeight?: number | null
+  /** Source info synced from the connected Input, for the single-PNG frame preview. */
+  srcKind?: 'video' | 'sequence' | null
+  srcPath?: string | null
+  srcFrames?: number | null
+  srcFps?: number | null
+  /** Active upstream Crop rect (source px), so the preview matches the cropped output. */
+  srcCrop?: { x: number; y: number; width: number; height: number } | null
   /** Audio bitrate in kbps for formats that carry audio (default 192). */
   audioBitrate?: number
+  /** Loop packaging (webp / pngseq); 'boomerang' plays forward then back. Default 'normal'. */
+  loopMode?: LoopMode
+  /** PNG format only: 'sequence' (all frames) or 'single' (one frame). Default 'sequence'. */
+  pngMode?: PngMode
+  /** PNG 'single' mode: 0-based index of the processed frame to export. Default 0. */
+  pngFrame?: number
   outputPath: string | null
   /** Directory override from a connected Location node; null = use outputPath as a full path. */
   locationDir?: string | null
@@ -153,6 +181,10 @@ export interface OutputNodeData {
   status: JobState
   percent: number
   message?: string
+  /** Output file size in bytes once done (sum of frames for a PNG sequence). */
+  outSize?: number | null
+  /** Live pre-run validation problem for this Output (null = ready to run). */
+  problem?: string | null
   [key: string]: unknown
 }
 
@@ -185,7 +217,11 @@ export interface JobSpec {
     proresProfile: number
     hevcAlpha: boolean
     width: number | null
+    height: number | null
     audioBitrate?: number
+    loopMode?: string
+    pngMode?: string
+    pngFrame?: number
     outputPath: string
   }
   retime: { speed: number; reverse: boolean; interpolation: string } | null

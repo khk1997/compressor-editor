@@ -4,6 +4,13 @@ import { type JobState } from '../types'
 
 type UpdateNodeData = ReturnType<typeof useReactFlow>['updateNodeData']
 
+interface Part {
+  percent: number
+  status: string
+  message?: string
+  size?: number | null
+}
+
 /** Subscribes to IPC job status/log events and aggregates batch progress. */
 export function useJobRunner(updateNodeData: UpdateNodeData): {
   logs: string[]
@@ -11,20 +18,23 @@ export function useJobRunner(updateNodeData: UpdateNodeData): {
   running: boolean
   setRunning: React.Dispatch<React.SetStateAction<boolean>>
   batchTotals: React.MutableRefObject<Map<string, number>>
-  batchParts: React.MutableRefObject<Map<string, { percent: number; status: string; message?: string }[]>>
+  batchParts: React.MutableRefObject<Map<string, Part[]>>
 } {
   const [logs, setLogs] = useState<string[]>([])
   const [running, setRunning] = useState(false)
   const batchTotals = useRef<Map<string, number>>(new Map())
-  const batchParts = useRef<Map<string, { percent: number; status: string; message?: string }[]>>(
-    new Map()
-  )
+  const batchParts = useRef<Map<string, Part[]>>(new Map())
 
   useEffect(() => {
     const offStatus = window.api.onJobStatus((s) => {
       const sep = s.id.indexOf('::')
       if (sep < 0) {
-        updateNodeData(s.id, { status: s.status, percent: s.percent, message: s.message })
+        updateNodeData(s.id, {
+          status: s.status,
+          percent: s.percent,
+          message: s.message,
+          ...(s.sizeBytes != null ? { outSize: s.sizeBytes } : {})
+        })
         if (s.status === 'error' && s.message) {
           setLogs((l) => [...l, `[${s.id}] ERROR: ${s.message}`])
         }
@@ -33,7 +43,7 @@ export function useJobRunner(updateNodeData: UpdateNodeData): {
       const base = s.id.slice(0, sep)
       const idx = Number(s.id.slice(sep + 2))
       const parts = batchParts.current.get(base) ?? []
-      parts[idx] = { percent: s.percent, status: s.status, message: s.message }
+      parts[idx] = { percent: s.percent, status: s.status, message: s.message, size: s.sizeBytes }
       batchParts.current.set(base, parts)
       const total = batchTotals.current.get(base) ?? parts.filter(Boolean).length
       const present = parts.filter(Boolean)
@@ -57,7 +67,13 @@ export function useJobRunner(updateNodeData: UpdateNodeData): {
           status = 'idle'
         }
       }
-      updateNodeData(base, { status, percent, message })
+      const totalSize = present.reduce((a, p) => a + (p.size ?? 0), 0)
+      updateNodeData(base, {
+        status,
+        percent,
+        message,
+        ...(status === 'done' ? { outSize: totalSize } : {})
+      })
       if (s.status === 'error' && s.message) {
         setLogs((l) => [...l, `[${s.id}] ERROR: ${s.message}`])
       }

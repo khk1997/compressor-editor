@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'path'
 import {
   runJob,
+  outputSize,
   probeMedia,
   probeSequence,
   thumbnail,
@@ -68,6 +69,22 @@ app.whenReady().then(() => {
   ipcMain.handle('media:probeSequence', (_e, folder: string) => probeSequence(folder))
   ipcMain.handle('media:listVideos', (_e, folder: string) => listVideosInFolder(folder))
   ipcMain.handle('media:thumbnail', (_e, req: ThumbnailRequest) => thumbnail(req))
+
+  // Read a small media file as a data URL, so the renderer can show it directly —
+  // used for the WebP result preview (Chromium plays animated WebP in an <img>,
+  // which ffmpeg can't reliably decode). Capped so a huge output won't bloat IPC.
+  ipcMain.handle('media:dataUrl', async (_e, p: string): Promise<string | null> => {
+    try {
+      const st = statSync(p)
+      if (!st.isFile() || st.size > 16_000_000) return null
+      const buf = await readFile(p)
+      const ext = p.toLowerCase().split('.').pop()
+      const mime = ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : 'image/png'
+      return `data:${mime};base64,${buf.toString('base64')}`
+    } catch {
+      return null
+    }
+  })
 
   // Identify a dropped path: folder of videos (batch), PNG sequence, or a video file.
   ipcMain.handle('media:inspectPath', async (_e, p: string) => {
@@ -142,7 +159,7 @@ app.whenReady().then(() => {
         })
         run.kill = kill
         await promise
-        send('job:status', { id: job.id, status: 'done', percent: 1 })
+        send('job:status', { id: job.id, status: 'done', percent: 1, sizeBytes: outputSize(job) })
       } catch (err) {
         if (run.cancelled) {
           send('job:status', { id: job.id, status: 'idle', percent: 0 })
@@ -167,6 +184,10 @@ app.whenReady().then(() => {
   })
 })
 
+// Quit on window close on every platform (including macOS). This is a
+// single-window utility, so closing the window should fully exit — and in dev it
+// lets `electron-vite dev` (and the detached dev.command process) exit too,
+// instead of lingering per the usual macOS "stay in the dock" convention.
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  app.quit()
 })

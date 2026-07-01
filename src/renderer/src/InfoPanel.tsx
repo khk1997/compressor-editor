@@ -2,6 +2,7 @@ import type { Node } from '@xyflow/react'
 import {
   CODEC_LABEL,
   FORMAT_CODECS,
+  supportsBoomerang,
   supportsHardware,
   supportsHevcAlpha,
   supportsTarget,
@@ -38,7 +39,7 @@ const FORMAT_LABEL: Record<OutputFormat, string> = {
   mp4: 'MP4(容器)',
   mov: 'MOV(容器)',
   webm: 'WebM(VP9)',
-  pngseq: 'PNG 序列'
+  pngseq: 'PNG'
 }
 
 const FORMAT_INFO: Record<OutputFormat, string> = {
@@ -47,7 +48,7 @@ const FORMAT_INFO: Record<OutputFormat, string> = {
   mov: '剪輯用容器。預設 ProRes(高品質中間檔,檔案很大);也可改用 H.264 / H.265 壓成較小的檔案。用下面的 Codec 切換。',
   webm: 'VP9。網頁友善,可保留透明 alpha(瀏覽器可解),壓縮率優於 H.264。編碼較慢。Safari 舊版支援有限。',
   pngseq:
-    '把影片/序列逐格輸出成 PNG 圖檔(無損、保留透明 alpha、無音訊)。影格會放進以檔名命名的子資料夾(如 frames/frames_00001.png)。適合丟進其他軟體做後續處理、修圖或重新合成。檔案總量通常很大。'
+    '無損 PNG 圖檔(保留透明 alpha、無音訊)。可輸出「序列」(所有影格)或「單張」(挑其中一格)。用下面的 PNG 模式切換。適合丟進其他軟體做後續處理、修圖或重新合成。'
 }
 
 /** Per-codec guidance, shown for whichever codecs the chosen container offers. */
@@ -91,6 +92,33 @@ export function InfoPanel({ node }: { node: Node | undefined }): JSX.Element | n
         <>
           <div className="info-sub">格式:{FORMAT_LABEL[fmt]}</div>
           <div className="info-desc">{FORMAT_INFO[fmt]}</div>
+        </>
+      )}
+
+      {fmt === 'pngseq' && (
+        <>
+          <div className="info-sub">PNG · 輸出模式</div>
+          <div className="info-desc">
+            <b>序列(所有影格)</b> — 每一格輸出成一張,放進以檔名命名的子資料夾(如
+            frames/frames_00001.png)。
+            <br />
+            <b>單張(單一影格)</b> — 只輸出一張 PNG 到你選的位置(不進子資料夾)。拖預覽下方的滑桿即時挑格
+            (或用數字欄精準輸入,0 起算);來源只有一張圖就填 0。預覽顯示的是來源影格(裁切/變速不套用)。
+          </div>
+        </>
+      )}
+
+      {fmt && supportsBoomerang(fmt) && (
+        <>
+          <div className="info-sub">Loop · 循環</div>
+          <div className="info-desc">
+            <b>Normal</b> — 正常單向循環(播到底後從頭再播)。
+            <br />
+            <b>Boomerang(往返)</b> — 播到底後反向播回開頭,來回擺動。作法是把影格接上反轉的一段
+            (兩端各去一張避免頓格),所以長度約變兩倍、檔案較大、輸出較久。所有格式皆可用;影片
+            (MP4/MOV/WebM)會靜音輸出,長片較吃記憶體;因長度翻倍無法精準命中檔案大小,選
+            Boomerang 時會自動改用 Quality 模式。
+          </div>
         </>
       )}
 

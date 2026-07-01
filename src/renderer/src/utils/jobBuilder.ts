@@ -34,6 +34,29 @@ export function resolveInputNode(startId: string, nodes: Node[], edges: Edge[]):
   return cur?.type === 'input-node' ? cur : undefined
 }
 
+/** Walk edges backward to find an active Crop node feeding `startId` (else null). */
+export function resolveUpstreamCrop(
+  startId: string,
+  nodes: Node[],
+  edges: Edge[]
+): CropNodeData | null {
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const incoming = (nodeId: string): Node | undefined => {
+    const e = edges.find((ed) => ed.target === nodeId && ed.targetHandle !== 'location')
+    return e ? byId.get(e.source) : undefined
+  }
+  let cur = incoming(startId)
+  let guard = 0
+  while (cur && cur.type !== 'input-node' && guard++ < 50) {
+    if (cur.type === 'crop-node') {
+      const c = cur.data as CropNodeData
+      if (c.width > 0 && c.height > 0) return c
+    }
+    cur = incoming(cur.id)
+  }
+  return null
+}
+
 export function buildJobs(
   nodes: Node[],
   edges: Edge[]
@@ -91,7 +114,12 @@ export function buildJobs(
     }
 
     const codec = outData.codec ?? FORMAT_CODECS[outData.format as OutputFormat]?.[0] ?? 'h264'
-    const isTarget = supportsTarget(outData.format, codec) && outData.sizeMode === 'target'
+    // Boomerang doubles the length, so it can't hit an exact target size — it always
+    // falls back to Quality (the UI hides target mode when boomerang is on).
+    const isTarget =
+      supportsTarget(outData.format, codec) &&
+      outData.sizeMode === 'target' &&
+      outData.loopMode !== 'boomerang'
     if (isTarget) {
       if (isBatch) {
         problems.push(`${out.id}: target file size isn't supported for Batch — use Quality`)
@@ -117,7 +145,11 @@ export function buildJobs(
       proresProfile: outData.proresProfile,
       hevcAlpha: outData.hevcAlpha,
       width: outData.width,
-      audioBitrate: outData.audioBitrate
+      height: outData.height ?? null,
+      audioBitrate: outData.audioBitrate,
+      loopMode: outData.loopMode ?? 'normal',
+      pngMode: outData.pngMode ?? 'sequence',
+      pngFrame: outData.pngFrame ?? 0
     }
     const retimeSpec = retime
       ? { speed: retime.speed, reverse: retime.reverse, interpolation: retime.interpolation }

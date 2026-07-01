@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { existsSync, readdirSync, statSync, rmSync, mkdtempSync, mkdirSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, rmSync, mkdtempSync, mkdirSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import ffmpegStatic from 'ffmpeg-static'
@@ -113,6 +113,35 @@ function listSequencePngs(folder: string): string[] {
     .map((f) => path.join(folder, f))
 }
 
+/**
+ * Boomerang (ping-pong) an ordered frame list: play forward, then the middle
+ * back again so the loop turns around seamlessly. Both endpoints are excluded
+ * from the return leg so neither turnaround shows a duplicated (stuttered) frame.
+ * [f0,f1,f2,f3] → [f0,f1,f2,f3,f2,f1]
+ */
+function boomerangFrames(frames: string[]): string[] {
+  if (frames.length <= 2) return frames
+  return frames.concat(frames.slice(1, -1).reverse())
+}
+
+/**
+ * Turn an already-written PNG sequence into a boomerang in place: copy the
+ * middle frames back out under continued numbering (matching the `_NNNNN.png`
+ * pattern) so a plain image sequence also plays forward-then-back.
+ */
+function boomerangPngSeq(dir: string): void {
+  const files = listSequencePngs(dir) // absolute paths, numeric-sorted
+  if (files.length <= 2) return
+  let next = files.length // continue numbering right after the last forward frame
+  for (const src of files.slice(1, -1).reverse()) {
+    const m = path.basename(src).match(/^(.*?)(\d+)(\.png)$/i)
+    if (!m) continue
+    const name = `${m[1]}${String(next).padStart(m[2].length, '0')}${m[3]}`
+    copyFileSync(src, path.join(dir, name))
+    next++
+  }
+}
+
 export interface SequenceInfo {
   frameCount: number
   width: number | null
@@ -169,6 +198,46 @@ export function pngSeqOutput(outputPath: string): { dir: string; pattern: string
   return { dir, pattern: path.join(dir, `${stem}_%05d.png`) }
 }
 
+/** True when PNG output is a single chosen frame (a plain file), not a sequence. */
+function isPngSingle(output: OutputSpec): boolean {
+  return output.format === 'pngseq' && output.pngMode === 'single'
+}
+
+/** Size in bytes of a finished job's output (sum of frames for a PNG sequence). */
+export function outputSize(job: Job): number | null {
+  try {
+    const o = job.output
+    if (o.format === 'pngseq' && !isPngSingle(o)) {
+      const dir = pngSeqOutput(o.outputPath).dir
+      return listSequencePngs(dir).reduce((a, f) => a + statSync(f).size, 0)
+    }
+    return statSync(o.outputPath).size
+  } catch {
+    return null
+  }
+}
+
+/** Video containers whose boomerang is baked in ffmpeg (not via a PNG frame list). */
+function isVideoContainer(format: OutputFormat): boolean {
+  return format === 'mp4' || format === 'mov' || format === 'webm'
+}
+
+/** True when a video-container output should be boomeranged in-encode. */
+function videoBoomerang(output: OutputSpec): boolean {
+  return output.loopMode === 'boomerang' && isVideoContainer(output.format)
+}
+
+/**
+ * filter_complex graph that plays the (already-filtered) video forward then in
+ * reverse, dropping the shared endpoints so neither turnaround stutters. Audio is
+ * intentionally not part of the graph (boomerang video is muted). NOTE: ffmpeg's
+ * `reverse` buffers the whole stream in RAM, so long clips are memory-heavy.
+ */
+function boomerangVideoGraph(filters: string[]): string {
+  const pre = filters.length ? `${filters.join(',')},` : ''
+  return `[0:v]${pre}split[a][b];[b]reverse[r];[a][r]concat=n=2:v=1[v]`
+}
+
 /** Video file extensions we accept as inputs (drag-drop, batch folders). */
 const VIDEO_EXT = /\.(mov|mp4|m4v|mkv|webm|avi)$/i
 
@@ -205,6 +274,10 @@ export interface ThumbnailRequest {
   path: string
   /** Seek time in seconds (video only). */
   timeSec?: number
+  /** Sequence only: 0-based index of the PNG to preview (default 0). */
+  frame?: number
+  /** Optional crop rect (source px), applied before downscaling. */
+  crop?: { x: number; y: number; width: number; height: number }
   /** Longest edge of the returned image; the frame is scaled down to fit. */
   maxWidth?: number
 }
@@ -216,17 +289,24 @@ export interface ThumbnailRequest {
  */
 export async function thumbnail(req: ThumbnailRequest): Promise<string | null> {
   const maxWidth = req.maxWidth ?? 320
-  // Only downscale (min with iw) so small sources aren't blown up.
-  const scale = `scale='min(${maxWidth},iw)':-1:flags=bilinear`
+  // Optional crop first (source px), then only downscale (min with iw) so small
+  // sources aren't blown up. Crop makes the preview match a cropped output.
+  const c = req.crop
+  const cropF = c && c.width > 0 && c.height > 0 ? `crop=${c.width}:${c.height}:${c.x}:${c.y},` : ''
+  const vf = `${cropF}scale='min(${maxWidth},iw)':-1:flags=bilinear`
   let args: string[]
   if (req.kind === 'sequence') {
-    const first = listSequencePngs(req.path)[0]
+    const pngs = listSequencePngs(req.path)
+    const idx = Math.min(Math.max(0, req.frame ?? 0), pngs.length - 1)
+    const first = pngs[idx]
     if (!first) return null
-    args = ['-y', '-i', first, '-vf', scale, '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1']
+    args = ['-y', '-i', first, '-vf', vf, '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1']
   } else {
     // -ss before -i = fast (keyframe) seek; accurate enough for a preview.
     const seek = req.timeSec && req.timeSec > 0 ? ['-ss', String(req.timeSec)] : []
-    args = ['-y', ...seek, '-i', req.path, '-vf', scale, '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1']
+    // Force libvpx for alpha WebM/MKV so the preview matches the transparent output.
+    const dec = webmDecoderArgs(req.path)
+    args = ['-y', ...dec, ...seek, '-i', req.path, '-vf', vf, '-frames:v', '1', '-f', 'image2pipe', '-c:v', 'png', 'pipe:1']
   }
   const buf = await runFfmpegCapture(args)
   return buf ? `data:image/png;base64,${buf.toString('base64')}` : null
@@ -327,8 +407,10 @@ export interface OutputSpec {
   sizeMode: SizeMode
   /** Desired output size in MB when sizeMode === 'target'. */
   targetMB: number | null
-  /** Target width in px; height is auto to keep aspect ratio. null = keep original. */
+  /** Target width in px; null = auto (derive from height, or keep original). */
   width: number | null
+  /** Target height in px; null = auto (derive from width, or keep original). */
+  height?: number | null
   /** Use the macOS VideoToolbox hardware encoder (MP4 / H.265). */
   hardware: boolean
   /** ProRes profile (MOV): 0 Proxy … 3 HQ … 4 4444(alpha). */
@@ -339,6 +421,12 @@ export interface OutputSpec {
   hevcAlpha: boolean
   /** Audio bitrate in kbps (default 192). */
   audioBitrate?: number
+  /** Loop packaging (webp / pngseq): 'boomerang' appends the reversed middle. */
+  loopMode?: 'normal' | 'boomerang'
+  /** PNG format only: 'sequence' (numbered frames) or 'single' (one frame). */
+  pngMode?: 'sequence' | 'single'
+  /** PNG 'single' mode: 0-based index of the processed frame to export. */
+  pngFrame?: number
   outputPath: string
 }
 
@@ -455,6 +543,38 @@ function resolveDuration(input: InputSpec): number | null {
   return null
 }
 
+/**
+ * VP8/VP9 carry their alpha channel in a side stream that ffmpeg's *native*
+ * decoder silently ignores — frames decode fully opaque, so a transparent source
+ * turns semi-transparent glows into solid blobs and loses its background. The
+ * libvpx decoders keep the alpha, so force them for VP8/VP9 (typically WebM, but
+ * MKV can carry VP9 too). ProRes 4444 decodes its alpha fine natively, so only
+ * these VP codecs need the override. Returned as input-side `-c:v` args; cached
+ * per path to avoid re-probing when input args are built more than once
+ * (2-pass encodes, thumbnails). An opaque source probes to [] and stays rgb.
+ */
+const _webmDecoderCache = new Map<string, string[]>()
+function webmDecoderArgs(filePath: string): string[] {
+  if (!/\.(webm|mkv)$/i.test(filePath)) return []
+  const cached = _webmDecoderCache.get(filePath)
+  if (cached) return cached
+  const info = spawnSync(resolveFfmpegPath(), ['-i', filePath], { encoding: 'utf8' }).stderr ?? ''
+  // Only override when the container actually flags an alpha stream; an opaque
+  // VP9/VP8 decodes correctly — and faster — on the native decoder.
+  const hasAlpha = /alpha_mode\s*:\s*1/i.test(info)
+  const dec =
+    hasAlpha && /Video:\s*vp9/i.test(info)
+      ? ['-c:v', 'libvpx-vp9']
+      : hasAlpha && /Video:\s*vp8/i.test(info)
+        ? ['-c:v', 'libvpx']
+        : []
+  _webmDecoderCache.set(filePath, dec)
+  return dec
+}
+function alphaDecoderArgs(input: InputSpec): string[] {
+  return input.type === 'video' ? webmDecoderArgs(input.path) : []
+}
+
 function buildInputArgs(input: InputSpec): string[] {
   if (input.type === 'sequence') {
     return [
@@ -466,7 +586,23 @@ function buildInputArgs(input: InputSpec): string[] {
       path.join(input.path, '*.png')
     ]
   }
-  return ['-i', input.path]
+  // Force the libvpx decoder for alpha WebM (native VP9/VP8 decoders drop alpha);
+  // must come before `-i`. Applies to every output format, not just WebP. An
+  // opaque WebM stays rgb (no alpha added), so nothing else regresses.
+  return [...alphaDecoderArgs(input), '-i', input.path]
+}
+
+/**
+ * Build a `scale=` filter from optional width/height. When only one dimension
+ * is set, the other is `-2` (auto, kept even for yuv420p). Returns null when
+ * neither is set (keep original). When both are set the frame is scaled to
+ * those exact dimensions (aspect ratio may change).
+ */
+function scaleFilter(width: number | null | undefined, height: number | null | undefined): string | null {
+  const w = width && width > 0 ? width : null
+  const h = height && height > 0 ? height : null
+  if (!w && !h) return null
+  return `scale=${w ?? -2}:${h ?? -2}:flags=lanczos`
 }
 
 /** Trim + crop + retime + scale + fps video filter chain. */
@@ -515,9 +651,8 @@ function buildFilters(
   }
 
   // Resize (after crop/retime; -2 keeps the dimension even for yuv420p).
-  if (output.width && output.width > 0) {
-    filters.push(`scale=${output.width}:-2:flags=lanczos`)
-  }
+  const sf = scaleFilter(output.width, output.height)
+  if (sf) filters.push(sf)
 
   // Frame interpolation regenerates intermediate frames for smooth retiming.
   const fpsTarget = input.fps && input.fps > 0 ? input.fps : input.sourceFps && input.sourceFps > 0 ? input.sourceFps : 30
@@ -611,10 +746,17 @@ export function buildArgs(job: Job): string[] {
       break
     }
     case 'pngseq': {
-      // Lossless PNG image sequence. PNG keeps an alpha channel, so don't force a
-      // pixel format — let the source's (rgb24 / rgba) pass through. No audio.
-      // Frame numbering starts at 0 to mirror the import side's expectations.
-      args.push('-c:v', 'png', '-start_number', '0', '-an')
+      // Lossless PNG; keeps an alpha channel, so don't force a pixel format —
+      // let the source's (rgb24 / rgba) pass through. No audio.
+      if (isPngSingle(output)) {
+        // Single frame: select the chosen processed frame, emit exactly one file.
+        const frame = Math.max(0, Math.round(output.pngFrame ?? 0))
+        if (frame > 0) filters.push(`select=eq(n\\,${frame})`)
+        args.push('-c:v', 'png', '-frames:v', '1', '-an')
+      } else {
+        // Sequence: numbered frames starting at 0 (mirrors the import side).
+        args.push('-c:v', 'png', '-start_number', '0', '-an')
+      }
       break
     }
     case 'webm': {
@@ -645,13 +787,24 @@ export function buildArgs(job: Job): string[] {
     }
   }
 
-  if (filters.length) args.push('-vf', filters.join(','))
+  if (videoBoomerang(output)) {
+    // Forward+reverse via filter_complex; -map [v] keeps only video (audio dropped).
+    args.push('-filter_complex', boomerangVideoGraph(filters), '-map', '[v]')
+  } else if (filters.length) {
+    args.push('-vf', filters.join(','))
+  }
 
   // Audio (mp4/mov/webm/av1); webp has no audio. Re-encode at the chosen bitrate
   // whenever a track is present — not just when trim/retime adds a filter — so the
   // audio bitrate setting always takes effect. The trim/retime filter is layered on
-  // top only when needed (to keep audio in sync with the video edits).
-  if (output.format !== 'webp' && output.format !== 'pngseq' && input.hasAudio) {
+  // top only when needed (to keep audio in sync with the video edits). Boomerang
+  // video is muted (we only map [v]), so skip audio entirely there.
+  if (
+    output.format !== 'webp' &&
+    output.format !== 'pngseq' &&
+    input.hasAudio &&
+    !videoBoomerang(output)
+  ) {
     const af = buildAudioFilter(retime, trim, input)
     const acodec = output.format === 'webm' ? 'libopus' : 'aac'
     const abr = `${output.audioBitrate ?? 192}k`
@@ -659,7 +812,13 @@ export function buildArgs(job: Job): string[] {
     args.push('-c:a', acodec, '-b:a', abr)
   }
 
-  args.push(output.format === 'pngseq' ? pngSeqOutput(output.outputPath).pattern : output.outputPath)
+  // Sequence PNG goes to a numbered pattern in a subfolder; single PNG (and every
+  // other format) writes straight to the chosen path.
+  args.push(
+    output.format === 'pngseq' && !isPngSingle(output)
+      ? pngSeqOutput(output.outputPath).pattern
+      : output.outputPath
+  )
   return args
 }
 
@@ -766,7 +925,11 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
 
   // Progress / bitrate use the *output* duration, which trim / speed alter.
   const outDurationSec = effectiveDuration(input, retime, trim)
-  const totalUs = outDurationSec ? outDurationSec * 1_000_000 : null
+  // Boomerang video plays forward + reverse, so the encoded stream is ~2× as long;
+  // double the progress span so the bar tracks the real encode (target-size, which
+  // would need the same adjustment for bitrate, is blocked with boomerang upstream).
+  const progressSec = outDurationSec && videoBoomerang(output) ? outDurationSec * 2 : outDurationSec
+  const totalUs = progressSec ? progressSec * 1_000_000 : null
 
   // WebP encoding needs the libwebp encoder, which Homebrew's ffmpeg often lacks;
   // pick a binary that actually has it. Other formats use the default resolver.
@@ -778,14 +941,17 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
     output.sizeMode === 'target' &&
     !!output.targetMB &&
     output.targetMB > 0 &&
-    !!outDurationSec
+    !!outDurationSec &&
+    // Boomerang can't hit an exact size (length doubles); fall back to quality.
+    !videoBoomerang(output)
 
   // All WebP output goes through img2webp for correct per-frame disposal
   // (transparent animation). ffmpeg's libwebp stacks frames / drops alpha.
   const useWebp = output.format === 'webp'
 
   // image2 muxer won't create directories — make the per-output frame folder first.
-  if (output.format === 'pngseq') {
+  // (Single-frame PNG writes to the chosen path, whose folder already exists.)
+  if (output.format === 'pngseq' && !isPngSingle(output)) {
     mkdirSync(pngSeqOutput(output.outputPath).dir, { recursive: true })
   }
 
@@ -825,7 +991,8 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
             frames = listSequencePngs(tmpDir)
             durationMs = Math.max(Math.round(1000 / fps), 1) // timing baked into frames
           } else {
-            if (output.width && output.width > 0) {
+            const seqScale = scaleFilter(output.width, output.height)
+            if (seqScale) {
               // img2webp can't resize, so pre-scale every frame with ffmpeg first.
               tmpDir = mkdtempSync(path.join(tmpdir(), 'seqscale-'))
               const scaleArgs = [
@@ -837,7 +1004,7 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
                 '-i',
                 path.join(input.path, '*.png'),
                 '-vf',
-                `scale=${output.width}:-2:flags=lanczos`,
+                seqScale,
                 '-start_number',
                 '0',
                 path.join(tmpDir, 'f_%06d.png')
@@ -864,6 +1031,8 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
                 : 30
           tmpDir = mkdtempSync(path.join(tmpdir(), 'vidwebp-'))
           const vf = buildFilters(input, output, retime, trim, crop)
+          // buildInputArgs forces the libvpx decoder for alpha WebM; the PNG muxer
+          // then auto-selects rgba (opaque sources stay rgb), so alpha survives.
           const renderArgs = [
             '-y',
             ...buildInputArgs(input),
@@ -880,6 +1049,9 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
         }
         if (!frames.length) throw new Error('No frames to assemble for the WebP')
 
+        // Boomerang: append the middle in reverse so the animation plays out and back.
+        if (output.loopMode === 'boomerang') frames = boomerangFrames(frames)
+
         const args = [
           '-loop',
           '0',
@@ -888,8 +1060,10 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
           '-lossy',
           '-q',
           String(output.quality),
+          // Boomerang doubles the frame count; drop img2webp's compression effort
+          // from 6 to 4 so the extra frames don't roughly double the packing time.
           '-m',
-          '6',
+          output.loopMode === 'boomerang' ? '4' : '6',
           ...frames,
           '-o',
           output.outputPath
@@ -1004,7 +1178,13 @@ export function runJob(job: Job, cb: RunCallbacks): { promise: Promise<void>; ki
       }
     })()
   } else {
-    promise = runFfmpeg(buildArgs(job), totalUs, 0, 1, cb, setChild, ffBin).then(() => cb.onProgress(1))
+    promise = runFfmpeg(buildArgs(job), totalUs, 0, 1, cb, setChild, ffBin).then(() => {
+      // Boomerang for a plain PNG sequence: duplicate the middle frames back out.
+      if (output.format === 'pngseq' && output.loopMode === 'boomerang' && !isPngSingle(output)) {
+        boomerangPngSeq(pngSeqOutput(output.outputPath).dir)
+      }
+      cb.onProgress(1)
+    })
   }
 
   return { promise, kill: () => current?.kill('SIGKILL') }
