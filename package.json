@@ -1,7 +1,7 @@
 {
   "name": "compressor-editor",
-  "version": "0.1.0",
-  "description": "Node-based media compressor (PNG sequence / MOV / MP4 → WebP / MP4 / MOV)",
+  "version": "0.1.1",
+  "description": "Node-based media compressor (PNG sequence / MOV / MP4 → WebP / MP4 / MOV / APNG)",
   "main": "./out/main/index.js",
   "author": "Patrick Kuo",
   "license": "MIT",

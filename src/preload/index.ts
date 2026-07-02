@@ -20,6 +20,13 @@ export interface ThumbnailRequest {
   maxWidth?: number
 }
 
+export interface PreviewAnimRequest {
+  kind: 'video' | 'sequence'
+  path: string
+  fps?: number
+  maxWidth?: number
+}
+
 /** Result of inspecting a dropped path (folder of videos / PNG sequence / file). */
 export type InspectResult =
   | { kind: 'batch'; videos: string[] }
@@ -62,6 +69,9 @@ const api = {
     ipcRenderer.invoke('media:thumbnail', req),
   /** Read a small file (e.g. a WebP result) as a data URL for direct <img> display. */
   readDataUrl: (p: string): Promise<string | null> => ipcRenderer.invoke('media:dataUrl', p),
+  /** Small looping animated (APNG) preview of a source, for hover-to-play. */
+  previewAnim: (req: PreviewAnimRequest): Promise<string | null> =>
+    ipcRenderer.invoke('media:previewAnim', req),
   inspectPath: (p: string): Promise<InspectResult> => ipcRenderer.invoke('media:inspectPath', p),
   /** Resolve a dropped File to its absolute filesystem path (sandbox-safe). */
   pathForFile: (file: File): string => webUtils.getPathForFile(file),

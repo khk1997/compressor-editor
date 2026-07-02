@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { existsSync, readdirSync, statSync, rmSync, mkdtempSync, mkdirSync, copyFileSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, rmSync, mkdtempSync, mkdirSync, copyFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import ffmpegStatic from 'ffmpeg-static'
@@ -183,7 +183,7 @@ export function probeSequence(folder: string): Promise<SequenceInfo> {
 }
 
 export type SourceType = 'sequence' | 'video' | 'batch'
-export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm' | 'pngseq'
+export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm' | 'pngseq' | 'apng'
 
 /**
  * Map a chosen `.png` destination to a PNG-sequence output: frames go into a
@@ -222,9 +222,13 @@ function isVideoContainer(format: OutputFormat): boolean {
   return format === 'mp4' || format === 'mov' || format === 'webm'
 }
 
-/** True when a video-container output should be boomeranged in-encode. */
+/** True when a ffmpeg-encoded output should be boomeranged via filter_complex
+ *  (video containers + APNG; WebP/PNG-seq repack their frame list instead). */
 function videoBoomerang(output: OutputSpec): boolean {
-  return output.loopMode === 'boomerang' && isVideoContainer(output.format)
+  return (
+    output.loopMode === 'boomerang' &&
+    (isVideoContainer(output.format) || output.format === 'apng')
+  )
 }
 
 /**
@@ -310,6 +314,68 @@ export async function thumbnail(req: ThumbnailRequest): Promise<string | null> {
   }
   const buf = await runFfmpegCapture(args)
   return buf ? `data:image/png;base64,${buf.toString('base64')}` : null
+}
+
+export interface PreviewAnimRequest {
+  kind: 'video' | 'sequence'
+  path: string
+  /** Sequence input rate; also caps the video preview's frame rate. */
+  fps?: number
+  /** Longest edge of the returned preview. */
+  maxWidth?: number
+}
+
+/** Spawn a process and resolve true on a clean (code 0) exit; false otherwise. */
+function spawnOk(bin: string, args: string[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn(bin, args)
+    child.stderr.on('data', () => {})
+    child.on('error', () => resolve(false))
+    child.on('close', (code) => resolve(code === 0))
+  })
+}
+
+/**
+ * A small looping animated preview (WebP data URL) of a source, for hover-to-play
+ * in the Input node and the APNG result preview. Downscaled + low fps + short so it
+ * stays tiny. Uses WebP (packed by img2webp for correct alpha) because APNG does not
+ * animate in an <img> here. Returns null on failure — never throws.
+ */
+export async function previewAnim(req: PreviewAnimRequest): Promise<string | null> {
+  const w = req.maxWidth ?? 240
+  const fps = Math.min(req.fps && req.fps > 0 ? req.fps : 12, 12)
+  const durationMs = Math.max(Math.round(1000 / fps), 1)
+  const scale = `scale='min(${w},iw)':-1:flags=bilinear`
+  let tmpDir: string | null = null
+  try {
+    tmpDir = mkdtempSync(path.join(tmpdir(), 'anim-'))
+    // 1) Render capped, downscaled rgba frames (libvpx decoder for alpha WebM/MKV).
+    const out = path.join(tmpDir, 'f_%04d.png')
+    const renderArgs =
+      req.kind === 'sequence'
+        ? ['-y', '-framerate', String(fps), '-pattern_type', 'glob', '-i', path.join(req.path, '*.png'),
+            '-frames:v', '48', '-vf', scale, '-pix_fmt', 'rgba', '-start_number', '0', out]
+        : ['-y', ...webmDecoderArgs(req.path), '-t', '3', '-i', req.path, '-vf', `${scale},fps=${fps}`,
+            '-pix_fmt', 'rgba', '-start_number', '0', out]
+    if (!(await spawnOk(resolveFfmpegPath(), renderArgs))) return null
+    const frames = listSequencePngs(tmpDir)
+    if (!frames.length) return null
+    // 2) Pack into an animated WebP (img2webp keeps per-frame alpha correctly).
+    const webp = path.join(tmpDir, 'preview.webp')
+    const webpArgs = ['-loop', '0', '-d', String(durationMs), '-lossy', '-q', '60', '-m', '4', ...frames, '-o', webp]
+    if (!(await spawnOk(resolveImg2webp(), webpArgs))) return null
+    return `data:image/webp;base64,${readFileSync(webp).toString('base64')}`
+  } catch {
+    return null
+  } finally {
+    if (tmpDir) {
+      try {
+        rmSync(tmpDir, { recursive: true, force: true })
+      } catch {
+        /* best-effort cleanup */
+      }
+    }
+  }
 }
 export type VideoCodec = 'h264' | 'h265' | 'av1' | 'prores'
 
@@ -785,6 +851,14 @@ export function buildArgs(job: Job): string[] {
       )
       break
     }
+    case 'apng': {
+      // Animated PNG: lossless, full alpha, single file. ffmpeg's apng encoder
+      // handles alpha + per-frame disposal natively (no img2webp needed). rgba
+      // keeps transparency; -plays 0 loops forever; -f apng forces the animated
+      // muxer (a .png extension would otherwise write a single still frame).
+      args.push('-c:v', 'apng', '-plays', '0', '-pix_fmt', 'rgba', '-f', 'apng', '-an')
+      break
+    }
   }
 
   if (videoBoomerang(output)) {
@@ -802,6 +876,7 @@ export function buildArgs(job: Job): string[] {
   if (
     output.format !== 'webp' &&
     output.format !== 'pngseq' &&
+    output.format !== 'apng' &&
     input.hasAudio &&
     !videoBoomerang(output)
   ) {

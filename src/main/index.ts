@@ -8,9 +8,11 @@ import {
   probeMedia,
   probeSequence,
   thumbnail,
+  previewAnim,
   listVideosInFolder,
   type Job,
-  type ThumbnailRequest
+  type ThumbnailRequest,
+  type PreviewAnimRequest
 } from './ffmpeg'
 
 /** Tracks the in-flight batch so it can be cancelled. */
@@ -69,6 +71,7 @@ app.whenReady().then(() => {
   ipcMain.handle('media:probeSequence', (_e, folder: string) => probeSequence(folder))
   ipcMain.handle('media:listVideos', (_e, folder: string) => listVideosInFolder(folder))
   ipcMain.handle('media:thumbnail', (_e, req: ThumbnailRequest) => thumbnail(req))
+  ipcMain.handle('media:previewAnim', (_e, req: PreviewAnimRequest) => previewAnim(req))
 
   // Read a small media file as a data URL, so the renderer can show it directly —
   // used for the WebP result preview (Chromium plays animated WebP in an <img>,

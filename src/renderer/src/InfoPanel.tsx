@@ -39,6 +39,7 @@ const FORMAT_LABEL: Record<OutputFormat, string> = {
   mp4: 'MP4(容器)',
   mov: 'MOV(容器)',
   webm: 'WebM(VP9)',
+  apng: 'APNG(動畫)',
   pngseq: 'PNG'
 }
 
@@ -47,6 +48,7 @@ const FORMAT_INFO: Record<OutputFormat, string> = {
   mp4: '相容性最高的影片容器,幾乎所有裝置/瀏覽器都能播。可裝 H.264 / H.265 / AV1,用下面的 Codec 選擇。不支援透明。',
   mov: '剪輯用容器。預設 ProRes(高品質中間檔,檔案很大);也可改用 H.264 / H.265 壓成較小的檔案。用下面的 Codec 切換。',
   webm: 'VP9。網頁友善,可保留透明 alpha(瀏覽器可解),壓縮率優於 H.264。編碼較慢。Safari 舊版支援有限。',
+  apng: '動畫 PNG:單一檔案、無損、保留完整透明 alpha,瀏覽器與多數工具皆支援。無音訊。適合需要無損去背動畫、或目標只吃 APNG 的情境。缺點:檔案通常比 WebP 大很多(長片/高解析可能達數十 MB)。',
   pngseq:
     '無損 PNG 圖檔(保留透明 alpha、無音訊)。可輸出「序列」(所有影格)或「單張」(挑其中一格)。用下面的 PNG 模式切換。適合丟進其他軟體做後續處理、修圖或重新合成。'
 }

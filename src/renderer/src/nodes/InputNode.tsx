@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import { DeleteButton } from './DeleteButton'
 import { useThumbnail, type ThumbReq } from './useThumbnail'
@@ -30,11 +30,43 @@ function thumbReqFor(d: InputNodeData): ThumbReq | null {
   return null
 }
 
+/** Source for the hover-to-play animated preview (kind/path/fps). */
+function animReqFor(d: InputNodeData): { kind: 'video' | 'sequence'; path: string; fps?: number } | null {
+  if (d.sourceType === 'sequence' && d.path) return { kind: 'sequence', path: d.path, fps: d.fps ?? 30 }
+  if (d.sourceType === 'video' && d.path) return { kind: 'video', path: d.path, fps: d.detectedFps ?? undefined }
+  if (d.sourceType === 'batch' && d.batchFiles?.[0])
+    return { kind: 'video', path: d.batchFiles[0], fps: d.detectedFps ?? undefined }
+  return null
+}
+
 export function InputNode({ id, data }: NodeProps): JSX.Element {
   const { updateNodeData } = useReactFlow()
   const d = data as InputNodeData
   const [probing, setProbing] = useState(false)
   const { url: thumb } = useThumbnail(thumbReqFor(d))
+
+  // Hover-to-play: fetch a small looping APNG preview on first hover, cache it.
+  const [hover, setHover] = useState(false)
+  const [anim, setAnim] = useState<string | null>(null)
+  const animKey = d.sourceType === 'batch' ? (d.batchFiles?.[0] ?? '') : (d.path ?? '')
+  useEffect(() => {
+    setAnim(null) // source changed → drop the cached animation
+  }, [animKey, d.sourceType])
+  useEffect(() => {
+    if (!hover || anim) return
+    const src = animReqFor(d)
+    if (!src) return
+    let cancelled = false
+    window.api.previewAnim({ ...src, maxWidth: 392 }).then((u) => {
+      if (!cancelled) setAnim(u)
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hover, anim, animKey, d.sourceType])
+  const playing = hover && !!anim
+  const canAnimate = !!animReqFor(d)
 
   const resetDetected = {
     fps: null,
@@ -147,7 +179,17 @@ export function InputNode({ id, data }: NodeProps): JSX.Element {
           {d.path ? basename(d.path) : pickLabel}
         </button>
 
-        {thumb && <img className="node-thumb" src={thumb} draggable={false} alt="" />}
+        {thumb && (
+          <div
+            className="node-thumb-wrap"
+            onMouseEnter={() => setHover(true)}
+            onMouseLeave={() => setHover(false)}
+            title={canAnimate ? '移到預覽上播放動畫' : undefined}
+          >
+            <img className="node-thumb" src={playing ? (anim as string) : thumb} draggable={false} alt="" />
+            {canAnimate && !playing && <span className="thumb-play">▶</span>}
+          </div>
+        )}
 
         {d.sourceType === 'sequence' && (
           <>

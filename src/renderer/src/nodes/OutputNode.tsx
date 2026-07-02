@@ -129,31 +129,39 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
         ? `${d.locationDir}/${basename(d.outputPath)}`
         : d.outputPath
       : null
-  // WebP animates natively in an <img> (ffmpeg can't reliably decode animated WebP),
-  // so load it as a data URL; every other format uses an ffmpeg first-frame thumbnail.
-  const isWebp = d.format === 'webp'
+  // Preview strategy: WebP plays its real file directly (animates in <img>). Every
+  // other animated output (APNG can't animate in <img>; MP4/MOV/WebM aren't <img>
+  // media; PNG sequence is many files) gets a small animated-WebP preview via
+  // previewAnim. A single-frame PNG has nothing to animate → static thumbnail.
+  const staticOnly = pngSingle
   const resultReq: ThumbReq | null =
-    resultFull && !isWebp
-      ? isPngSeq && !pngSingle
-        ? { kind: 'sequence', path: resultFull.replace(/\.[^.]+$/, ''), bust: d.outSize ?? 0, maxWidth: 240 }
-        : { kind: 'video', path: resultFull, bust: d.outSize ?? 0, maxWidth: 240 }
+    resultFull && staticOnly
+      ? { kind: 'video', path: resultFull, bust: d.outSize ?? 0, maxWidth: 240 }
       : null
   const { url: resultThumb } = useThumbnail(resultReq)
-  const [webpResult, setWebpResult] = useState<string | null>(null)
+  const [animUrl, setAnimUrl] = useState<string | null>(null)
   useEffect(() => {
-    if (!resultFull || !isWebp) {
-      setWebpResult(null)
+    if (!resultFull || staticOnly) {
+      setAnimUrl(null)
       return
     }
     let cancelled = false
-    window.api.readDataUrl(resultFull).then((u) => {
-      if (!cancelled) setWebpResult(u)
+    const p =
+      d.format === 'webp'
+        ? window.api.readDataUrl(resultFull)
+        : window.api.previewAnim(
+            isPngSeq
+              ? { kind: 'sequence', path: resultFull.replace(/\.[^.]+$/, ''), maxWidth: 240 }
+              : { kind: 'video', path: resultFull, maxWidth: 240 }
+          )
+    p.then((u) => {
+      if (!cancelled) setAnimUrl(u)
     })
     return () => {
       cancelled = true
     }
-  }, [resultFull, isWebp, d.outSize])
-  const resultPreview = isWebp ? webpResult : resultThumb
+  }, [resultFull, d.format, isPngSeq, staticOnly, d.outSize])
+  const resultPreview = animUrl ?? resultThumb
 
   const isProres = d.format === 'mov' && codec === 'prores'
   const proresAlpha = isProres && d.proresProfile === 4
@@ -223,9 +231,16 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
             <option value="mp4">MP4</option>
             <option value="mov">MOV</option>
             <option value="webm">WebM (VP9)</option>
+            <option value="apng">APNG (animated)</option>
             <option value="pngseq">PNG</option>
           </select>
         </label>
+
+        {d.format === 'apng' && (
+          <div className="hint hint-muted">
+            無損動畫 PNG(保留透明、無音訊)。相容性廣,但檔案通常比 WebP 大很多。
+          </div>
+        )}
 
         {isPngSeq && (
           <label className="field">

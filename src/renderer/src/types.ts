@@ -14,7 +14,7 @@ export interface UpstreamSrc {
   srcFps?: number | null
 }
 /** Output container. The actual video codec is chosen separately (see VideoCodec). */
-export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm' | 'pngseq'
+export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm' | 'pngseq' | 'apng'
 /** Video codec. Which ones are valid depends on the container (see FORMAT_CODECS). */
 export type VideoCodec = 'h264' | 'h265' | 'av1' | 'prores'
 
@@ -64,7 +64,8 @@ export const FORMAT_CODECS: Record<OutputFormat, VideoCodec[]> = {
   mp4: ['h264', 'h265', 'av1'],
   mov: ['prores', 'h264', 'h265'],
   webm: [],
-  pngseq: []
+  pngseq: [],
+  apng: []
 }
 
 export type JobState = 'idle' | 'running' | 'done' | 'error'
@@ -98,7 +99,7 @@ export function supportsAlpha(
   proresProfile: number,
   hevcAlpha: boolean
 ): boolean {
-  if (format === 'webp' || format === 'webm' || format === 'pngseq') return true
+  if (format === 'webp' || format === 'webm' || format === 'pngseq' || format === 'apng') return true
   if (format === 'mov' && codec === 'prores' && proresProfile === 4) return true
   if (supportsHevcAlpha(format, codec) && hevcAlpha) return true
   return false
@@ -193,7 +194,8 @@ export const FORMAT_EXT: Record<OutputFormat, string> = {
   mp4: 'mp4',
   mov: 'mov',
   webm: 'webm',
-  pngseq: 'png'
+  pngseq: 'png',
+  apng: 'png'
 }
 
 /** Renderer-side job payload sent over IPC to the main process. */
