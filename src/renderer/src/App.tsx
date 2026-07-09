@@ -680,7 +680,8 @@ function Flow(): JSX.Element {
             detectedHeight: res.info.height,
             detectedSize: res.info.sizeBytes,
             detectedDuration: res.info.durationSec,
-            detectedHasAudio: res.info.hasAudio
+            detectedHasAudio: res.info.hasAudio,
+            detectedHasAlpha: res.info.hasAlpha
           }
         } else if (res.kind === 'sequence') {
           data = {
@@ -691,7 +692,8 @@ function Flow(): JSX.Element {
             detectedFrames: res.info.frameCount,
             detectedWidth: res.info.width,
             detectedHeight: res.info.height,
-            detectedSize: res.info.totalBytes
+            detectedSize: res.info.totalBytes,
+            detectedHasAlpha: res.info.hasAlpha
           }
         } else if (res.kind === 'batch') {
           const info = res.videos[0] ? await window.api.probeMedia(res.videos[0]) : null
@@ -704,7 +706,8 @@ function Flow(): JSX.Element {
             detectedWidth: info?.width ?? null,
             detectedHeight: info?.height ?? null,
             detectedDuration: info?.durationSec ?? null,
-            detectedHasAudio: info?.hasAudio ?? false
+            detectedHasAudio: info?.hasAudio ?? false,
+            detectedHasAlpha: info?.hasAlpha ?? false
           }
         } else {
           setLogs((l) => [...l, `⚠ Skipped (unrecognized): ${p}`])

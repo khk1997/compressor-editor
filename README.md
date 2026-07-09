@@ -26,13 +26,18 @@ chaining Trim, Crop and Retime stages.
 - **Alpha preserved across formats**: transparent sources — including VP8/VP9
   WebM/MKV (decoded via libvpx so alpha isn't dropped), ProRes 4444 and
   HEVC-with-Alpha — carry their transparency through to any alpha-capable output.
+  HEVC-with-Alpha is premultiplied before encoding so QuickTime/Safari render it
+  cleanly (no magenta fringing). Sending a transparent source to an output that
+  can't keep alpha shows a warning that transparency will bake to black.
 - **Loop / Boomerang**: bake a back-and-forth (ping-pong) loop into any output.
 - **Quality or target file size** (2-pass) per output.
 - **Processing nodes**: Trim (in/out), Crop, Retime (speed / reverse / frame
   interpolation), composable in any chain. An upstream Crop drives the Output's
   size and preview.
 - **Previews**: hover an Input to play a small animated preview; each Output
-  shows an animated result preview and final file size when it finishes.
+  shows an animated result preview and final file size when it finishes. (The
+  bundled decoder can't display HEVC-with-Alpha transparency, so that preview
+  shows on black — the exported file is still correct.)
 - Blender-style graph: a knife/scissors tool to cut links (toolbar toggle, or
   Ctrl/⌘-drag), drop a node onto a link to splice it in, per-node delete,
   save/load graph as JSON. Run/Stop with ⌘↵/Esc.

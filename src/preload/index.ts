@@ -7,6 +7,7 @@ export interface MediaInfo {
   sizeBytes: number | null
   durationSec: number | null
   hasAudio: boolean
+  hasAlpha: boolean
 }
 
 export interface ThumbnailRequest {
@@ -39,6 +40,7 @@ export interface SequenceInfo {
   width: number | null
   height: number | null
   totalBytes: number
+  hasAlpha: boolean
 }
 
 export interface JobStatus {

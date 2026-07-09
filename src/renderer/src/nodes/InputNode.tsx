@@ -76,6 +76,7 @@ export function InputNode({ id, data }: NodeProps): JSX.Element {
     detectedSize: null,
     detectedDuration: null,
     detectedHasAudio: false,
+    detectedHasAlpha: false,
     detectedFrames: null,
     batchFiles: null
   }
@@ -92,7 +93,8 @@ export function InputNode({ id, data }: NodeProps): JSX.Element {
           detectedFrames: info.frameCount,
           detectedWidth: info.width,
           detectedHeight: info.height,
-          detectedSize: info.totalBytes
+          detectedSize: info.totalBytes,
+          detectedHasAlpha: info.hasAlpha
         })
       } catch {
         updateNodeData(id, { detectedFrames: null })
@@ -116,7 +118,8 @@ export function InputNode({ id, data }: NodeProps): JSX.Element {
           detectedWidth: info?.width ?? null,
           detectedHeight: info?.height ?? null,
           detectedDuration: info?.durationSec ?? null,
-          detectedHasAudio: info?.hasAudio ?? false
+          detectedHasAudio: info?.hasAudio ?? false,
+          detectedHasAlpha: info?.hasAlpha ?? false
         })
       } catch {
         updateNodeData(id, { batchFiles: [] })
@@ -137,7 +140,8 @@ export function InputNode({ id, data }: NodeProps): JSX.Element {
         detectedHeight: info.height,
         detectedSize: info.sizeBytes,
         detectedDuration: info.durationSec,
-        detectedHasAudio: info.hasAudio
+        detectedHasAudio: info.hasAudio,
+        detectedHasAlpha: info.hasAlpha
       })
     } catch {
       updateNodeData(id, { detectedFps: null })

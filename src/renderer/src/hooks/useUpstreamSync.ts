@@ -18,6 +18,7 @@ interface SrcInfo {
   srcHeight: number | null
   srcFrames: number | null
   srcFps: number | null
+  srcHasAlpha: boolean
 }
 
 /** Derive preview/source fields from the feeding Input node (shared by Crop/Trim/Output). */
@@ -49,7 +50,8 @@ function deriveSrcInfo(inData: InputNodeData | undefined): SrcInfo {
     srcWidth: inData?.detectedWidth ?? null,
     srcHeight: inData?.detectedHeight ?? null,
     srcFrames,
-    srcFps
+    srcFps,
+    srcHasAlpha: inData?.detectedHasAlpha ?? false
   }
 }
 
@@ -105,6 +107,7 @@ export function useUpstreamSync(
         data.srcPath !== s.srcPath ||
         data.srcFrames !== s.srcFrames ||
         data.srcFps !== s.srcFps ||
+        data.srcHasAlpha !== s.srcHasAlpha ||
         cropChanged
       ) {
         updateNodeData(node.id, {

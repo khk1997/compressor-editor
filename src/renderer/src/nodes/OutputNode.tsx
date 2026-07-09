@@ -172,6 +172,10 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
   const targetMode = supportsTarget(d.format, codec) && d.sizeMode === 'target' && !boomerang
   const showHardware = supportsHardware(d.format, codec)
   const keepsAlpha = supportsAlpha(d.format, codec, d.proresProfile, hevcAlpha)
+  // Source carries transparency but the chosen output won't keep it → warn the
+  // user their transparent areas will bake to black.
+  const srcHasAlpha = !!d.srcHasAlpha
+  const dropsAlpha = srcHasAlpha && !keepsAlpha
 
   // hasLocation is true the moment a location node is wired up, even before a folder is picked.
   const hasLocation = !!d.locationConnected
@@ -450,13 +454,21 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
           </label>
         )}
 
-        {!keepsAlpha && !isProres && !hevcAlphaAvail && (
+        {dropsAlpha && (
+          <div className="hint hint-warn">
+            ⚠ 來源含透明,目前設定不會保留 — 輸出的透明區會變成黑底。
+            {hevcAlphaAvail
+              ? ' 勾選上方「Keep alpha」即可保留透明。'
+              : ' 改用 WebP / WebM / ProRes 4444 / APNG 才能保留透明。'}
+          </div>
+        )}
+        {!keepsAlpha && !isProres && !hevcAlphaAvail && !srcHasAlpha && (
           <div className="hint hint-warn">
             ⚠ {CODEC_LABEL[codec]} cannot keep transparency. Use WebP / WebM / ProRes 4444 for
             alpha.
           </div>
         )}
-        {isProres && !proresAlpha && (
+        {isProres && !proresAlpha && !srcHasAlpha && (
           <div className="hint hint-warn">⚠ Only the 4444 profile keeps transparency (alpha).</div>
         )}
 
@@ -508,6 +520,12 @@ export function OutputNode({ id, data }: NodeProps): JSX.Element {
             {resultPreview && (
               <div className="png-frame-preview">
                 <img className="png-frame-img" src={resultPreview} alt="" />
+              </div>
+            )}
+            {hevcAlpha && (
+              <div className="hint hint-muted">
+                ℹ 預覽顯示黑底屬正常 — 內建解碼無法呈現 HEVC 透明,但輸出檔的透明是正確的
+                (可用 QuickTime / Safari 確認)。
               </div>
             )}
             <div className="hint hint-ok">

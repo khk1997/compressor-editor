@@ -147,6 +147,8 @@ export interface SequenceInfo {
   width: number | null
   height: number | null
   totalBytes: number
+  /** First frame carries a transparency channel (e.g. RGBA PNG). */
+  hasAlpha: boolean
 }
 
 /** Inspect a PNG-sequence folder: frame count, resolution, total size. */
@@ -162,7 +164,7 @@ export function probeSequence(folder: string): Promise<SequenceInfo> {
   }
   const first = frames[0]
   if (!first) {
-    return Promise.resolve({ frameCount: 0, width: null, height: null, totalBytes: 0 })
+    return Promise.resolve({ frameCount: 0, width: null, height: null, totalBytes: 0, hasAlpha: false })
   }
   return new Promise((resolve) => {
     const child = spawn(resolveFfmpegPath(), ['-i', first])
@@ -174,7 +176,8 @@ export function probeSequence(folder: string): Promise<SequenceInfo> {
         frameCount: frames.length,
         width: m ? Number(m[1]) : null,
         height: m ? Number(m[2]) : null,
-        totalBytes
+        totalBytes,
+        hasAlpha: detectAlpha(stderr)
       })
     }
     child.on('error', done)
@@ -798,6 +801,10 @@ export function buildArgs(job: Job): string[] {
       if (output.codec === 'h265' && output.hevcAlpha) {
         // Apple "HEVC with Alpha". VideoToolbox-only — libx265 can't emit a
         // QuickTime-playable alpha layer. bgra feeds the encoder an alpha plane.
+        // Apple HEVC-alpha is *premultiplied*: premultiply before encoding, or
+        // QuickTime treats the source's straight RGB (garbage in transparent
+        // areas) as premultiplied and renders magenta noise + wrong edges.
+        filters.push('premultiply=inplace=1', 'format=rgba')
         const aq = (output.quality / 100).toFixed(2)
         args.push('-c:v', 'hevc_videotoolbox', '-q:v', String(output.quality), '-alpha_quality', aq, '-tag:v', 'hvc1', '-pix_fmt', 'bgra', '-movflags', '+faststart')
       } else if (output.codec === 'h264' || output.codec === 'h265') {
@@ -1272,6 +1279,19 @@ export interface MediaInfo {
   sizeBytes: number | null
   durationSec: number | null
   hasAudio: boolean
+  /** Source carries a transparency channel (alpha pixel format or WebM alpha_mode). */
+  hasAlpha: boolean
+}
+
+/**
+ * Detect a transparency channel from `ffmpeg -i` stderr: an alpha-bearing pixel
+ * format on the Video line (yuva*, rgba/bgra/argb/abgr, gbrap*, ya8/ya16) or a
+ * WebM/VP9 `alpha_mode : 1` tag.
+ */
+function detectAlpha(stderr: string): boolean {
+  const alphaPix = /Video:[^\n]*\b(yuva\w*|rgba|bgra|argb|abgr|gbra\w*|ya8|ya16\w*)\b/i.test(stderr)
+  const alphaMode = /alpha_mode\s*:\s*1/i.test(stderr)
+  return alphaPix || alphaMode
 }
 
 /**
@@ -1292,7 +1312,7 @@ export function probeMedia(file: string): Promise<MediaInfo> {
     let stderr = ''
     child.stderr.on('data', (b: Buffer) => (stderr += b.toString()))
     const fail = (): void =>
-      resolve({ fps: null, width: null, height: null, sizeBytes, durationSec: null, hasAudio: false })
+      resolve({ fps: null, width: null, height: null, sizeBytes, durationSec: null, hasAudio: false, hasAlpha: false })
     child.on('error', fail)
     child.on('close', () => {
       // e.g. "Video: h264 ..., yuv420p, 1920x1080 [SAR 1:1 ...], 1234 kb/s, 30 fps, ..."
@@ -1305,7 +1325,8 @@ export function probeMedia(file: string): Promise<MediaInfo> {
         height: dimM ? Number(dimM[2]) : null,
         sizeBytes,
         durationSec: durM ? Number(durM[1]) * 3600 + Number(durM[2]) * 60 + Number(durM[3]) : null,
-        hasAudio: /\bAudio:/.test(stderr)
+        hasAudio: /\bAudio:/.test(stderr),
+        hasAlpha: detectAlpha(stderr)
       })
     })
   })

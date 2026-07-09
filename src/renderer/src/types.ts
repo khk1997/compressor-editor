@@ -12,6 +12,8 @@ export interface UpstreamSrc {
   srcFrames?: number | null
   /** Source frame rate, used to convert frame drops to seconds for audio. */
   srcFps?: number | null
+  /** Source carries a transparency channel (drives the "will drop alpha" hint). */
+  srcHasAlpha?: boolean | null
 }
 /** Output container. The actual video codec is chosen separately (see VideoCodec). */
 export type OutputFormat = 'webp' | 'mp4' | 'mov' | 'webm' | 'pngseq' | 'apng'
@@ -127,6 +129,8 @@ export interface InputNodeData {
   detectedSize: number | null
   detectedDuration: number | null
   detectedHasAudio: boolean
+  /** Source carries a transparency channel (alpha pixel format / RGBA PNG). */
+  detectedHasAlpha?: boolean
   /** PNG-sequence frame count (null = unknown / not a sequence). */
   detectedFrames: number | null
   [key: string]: unknown
