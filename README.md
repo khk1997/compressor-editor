@@ -43,6 +43,23 @@ chaining Trim, Crop and Retime stages.
   save/load graph as JSON. Run/Stop with ⌘↵/Esc.
 - Batch queue with progress, cancel, and reveal-in-Finder.
 
+## Install (macOS)
+
+The app is not code-signed, so on first launch macOS Gatekeeper blocks it
+("app is damaged / cannot verify developer"). To open it:
+
+1. Download the matching DMG from
+   [Releases](https://github.com/khk1997/compressor-editor/releases) — Apple
+   Silicon → `-arm64.dmg`, Intel → `.dmg` — and drag **Compressor Editor** into
+   Applications.
+2. In Terminal, clear the quarantine attribute:
+
+   ```bash
+   xattr -cr "/Applications/Compressor Editor.app"
+   ```
+
+3. Open it normally from Applications.
+
 ## Develop
 
 ```bash
